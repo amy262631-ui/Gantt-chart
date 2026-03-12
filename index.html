@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>專業雲端工程甘特圖管理系統</title>
+    <!-- 匯出與 Canvas 處理函式庫 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <!-- Firebase 模組化載入 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 環境變數讀取
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'gantt-pro-tool';
+
+        // 將必要工具掛載至 window 供全域使用
+        window.firebase = { db, auth, appId, doc, setDoc, getDoc, collection, query, onSnapshot, deleteDoc, signInAnonymously, signInWithCustomToken };
+    </script>
+
+    <style>
+        :root {
+            --primary-bg: #f8f9fa;
+            --sidebar-width: 280px;
+            --accent-red: #d63031;
+            --highlight-yellow: #fff9db;
+            --border-color: #dee2e6;
+        }
+
+        body { font-family: "Microsoft JhengHei", system-ui, sans-serif; margin: 0; background: var(--primary-bg); color: #2d3436; }
+        
+        /* 介面佈局 */
+        .app-header { background: #2c3e50; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+        .main-content { padding: 20px; max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+        /* 專案管理列 */
+        .project-nav { background: white; padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); display: flex; gap: 15px; align-items: center; }
+        .project-select { flex-grow: 1; padding: 10px; border-radius: 6px; border: 1px solid #ced4da; font-size: 14px; }
+
+        /* 編輯區域 */
+        .editor-card { background: white; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .project-title-input { width: 100%; font-size: 1.5rem; font-weight: bold; padding: 12px; border: 2px solid #fab005; border-radius: 8px; margin-bottom: 20px; background: var(--highlight-yellow); box-sizing: border-box; color: #2c3e50; }
+        
+        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        th, td { border: 1px solid var(--border-color); padding: 10px; text-align: center; }
+        th { background: #f1f3f5; font-size: 14px; color: #495057; }
+        
+        input, select { padding: 6px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; width: 100%; box-sizing: border-box; }
+        .task-days { color: var(--accent-red); font-weight: bold; text-align: center; }
+        .task-end-display { color: #636e72; font-size: 12px; font-weight: bold; }
+
+        /* 按鈕樣式 */
+        .btn { border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-primary { background: #0984e3; color: white; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn-danger { background: #e17055; color: white; }
+        .btn-dark { background: #2d3436; color: white; }
+        .btn-small { padding: 4px 8px; font-size: 12px; }
+        .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+
+        /* 看板樣式 */
+        .summary-banner { background: #fff9db; border: 2px solid #fcc419; padding: 15px; border-radius: 8px; text-align: center; font-size: 1.1rem; font-weight: bold; }
+        .summary-total { color: var(--accent-red); font-size: 1.8rem; margin: 0 10px; }
+
+        /* 甘特圖顯示區 */
+        .gantt-section { background: white; border-radius: 10px; border: 1px solid var(--border-color); display: flex; overflow: hidden; box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
+        .gantt-sidebar { width: var(--sidebar-width); flex-shrink: 0; background: #f8f9fa; border-right: 2px solid #2d3436; z-index: 5; }
+        .gantt-sidebar-header { height: 90px; background: #e9ecef; border-bottom: 2px solid #2d3436; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px; text-align: center; }
+        .gantt-project-name { color: #e67e22; font-weight: bold; font-size: 14px; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        
+        .gantt-main { flex-grow: 1; overflow-x: auto; position: relative; }
+        .gantt-timeline { height: 90px; position: relative; border-bottom: 2px solid #2d3436; background: white; }
+        .month-marker { position: absolute; top: 8px; border-left: 1px solid #adb5bd; padding-left: 6px; font-weight: bold; font-size: 13px; color: #212529; }
+        .day-marker { position: absolute; bottom: 8px; font-size: 10px; color: #868e96; transform: scale(0.9); }
+
+        .gantt-row { height: 45px; border-bottom: 1px solid #f1f3f5; position: relative; display: flex; align-items: center; }
+        .sidebar-task-item { height: 45px; display: flex; align-items: center; padding: 0 15px; border-bottom: 1px solid #f1f3f5; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        .task-bar { position: absolute; height: 28px; border-radius: 14px; color: white; font-size: 11px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 6px rgba(0,0,0,0.15); white-space: nowrap; cursor: pointer; z-index: 2; border: 1px solid rgba(0,0,0,0.1); }
+        .gantt-grid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; background-image: linear-gradient(to right, #f1f3f5 1px, transparent 1px); }
+
+        /* 載入中 */
+        .loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10000; }
+        .spinner { width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div id="loader" class="loader">
+    <div class="spinner"></div>
+    <div id="loaderText">正在讀取雲端工程資料...</div>
+</div>
+
+<header class="app-header">
+    <div style="display: flex; align-items: center; gap: 15px;">
+        <h1 style="margin: 0; font-size: 1.4rem;">🏗️ 工程時程管理系統</h1>
+    </div>
+    <div class="export-actions">
+        <button class="btn btn-dark" onclick="exportFile('jpg')">🖼️ 匯出 JPG 圖片</button>
+        <button class="btn btn-dark" onclick="exportFile('pdf')">📄 匯出 PDF 報告</button>
+    </div>
+</header>
+
+<div class="main-content">
+    <!-- 專案選擇列 -->
+    <div class="project-nav">
+        <strong>工程切換：</strong>
+        <select id="projectSelect" class="project-select" onchange="loadSpecificProject(this.value)">
+            <option value="">載入中...</option>
+        </select>
+        <button class="btn btn-success" onclick="addNewProject()">+ 新增工程</button>
+        <button class="btn btn-danger" onclick="deleteCurrentProject()">🗑️ 刪除專案</button>
+    </div>
+
+    <!-- 編輯區域 -->
+    <div class="editor-card">
+        <input type="text" id="projectName" class="project-title-input" placeholder="請輸入工程名稱 (將同步顯示於甘特圖)" oninput="handleTitleUpdate()">
+        
+        <table id="taskTable">
+            <thead>
+                <tr>
+                    <th style="width: 25%;">工作項目內容</th>
+                    <th style="width: 8%;">預估天數</th>
+                    <th style="width: 20%;">起始日期</th>
+                    <th style="width: 15%;">完成日期</th>
+                    <th style="width: 12%;">長條顏色</th>
+                    <th style="width: 18%;">操作</th>
+                </tr>
+            </thead>
+            <tbody id="taskBody"></tbody>
+        </table>
+        <button class="btn btn-primary" onclick="addTaskRow()">+ 新增工作細項</button>
+    </div>
+
+    <!-- 統計看板 -->
+    <div id="summaryBanner" class="summary-banner">
+        正在計算工程週期...
+    </div>
+
+    <!-- 甘特圖渲染區 -->
+    <div id="captureArea" class="gantt-section">
+        <div class="gantt-sidebar">
+            <div class="gantt-sidebar-header">
+                <div id="ganttDisplayTitle" class="gantt-project-name">未命名工程</div>
+                <div style="font-size: 12px; color: #495057;">工作清單項目</div>
+            </div>
+            <div id="sidebarList"></div>
+        </div>
+        <div id="scrollArea" class="gantt-main">
+            <div id="timeAxis" class="gantt-timeline"></div>
+            <div id="ganttChartBody" class="gantt-body">
+                <div class="gantt-grid" id="ganttGrid"></div>
+                <div id="taskBarArea"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    // --- 核心變數 ---
+    let activeProjectId = '';
+    let projectsMap = {};
+    const pxPerDay = 2.2; // 壓縮橫向比例，利於全範圍匯出顯示
+
+    // 預設資料集 (初始化用)
+    const initialDefaultData = [
+        { name: "量測與配置設計規劃", days: 15, start: "2026-04-01", follow: false, color: "#9b59b6" },
+        { name: "土木設計+技師:施工圖", days: 30, start: "", follow: true, color: "#9b59b6" },
+        { name: "設備施工圖", days: 45, start: "", follow: true, color: "#9b59b6" },
+        { name: "設備拆除 3-(完成拌合系統拆除)", days: 20, start: "2026-06-01", follow: false, color: "#f39c12" },
+        { name: "土木拆除", days: 30, start: "", follow: true, color: "#f39c12" },
+        { name: "土木完成", days: 60, start: "", follow: true, color: "#27ae60" },
+        { name: "製作圖 材料購買、製作 2-(原料採購後廠驗)", days: 120, start: "2026-06-21", follow: false, color: "#4A90E2" },
+        { name: "安裝完成 (完成拌合系統主結構定位)", days: 240, start: "", follow: true, color: "#2c3e50" },
+        { name: "試運轉出料 (完成儀控定位及試運轉)", days: 30, start: "", follow: true, color: "#e74c3c" },
+        { name: "收尾改善缺失 (驗收完成)", days: 60, start: "", follow: true, color: "#fd79a8" }
+    ];
+
+    // --- Firebase 初始化流程 ---
+    window.addEventListener('load', async () => {
+        const { auth, db, appId, signInAnonymously, signInWithCustomToken, collection, onSnapshot } = window.firebase;
+        
+        try {
+            // 規則 3: 先驗證
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+
+            // 規則 1: 嚴格路徑
+            const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'projects');
+
+            // 實時監聽資料庫
+            onSnapshot(colRef, (snapshot) => {
+                projectsMap = {};
+                snapshot.forEach(doc => projectsMap[doc.id] = doc.data());
+                
+                updateSelectorUI();
+                
+                if (!activeProjectId || !projectsMap[activeProjectId]) {
+                    const keys = Object.keys(projectsMap);
+                    if (keys.length > 0) {
+                        loadSpecificProject(keys[0]);
+                    } else {
+                        addNewProject("新工程項目", true);
+                    }
+                } else {
+                    refreshUI();
+                }
+                document.getElementById('loader').style.display = 'none';
+            }, (err) => {
+                document.getElementById('loaderText').innerText = "雲端權限錯誤，請檢查配置";
+            });
+
+        } catch (e) { console.error(e); }
+    });
+
+    // --- 專案邏輯 ---
+
+    window.updateSelectorUI = () => {
+        const sel = document.getElementById('projectSelect');
+        sel.innerHTML = '';
+        Object.keys(projectsMap).forEach(id => {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = projectsMap[id].title || "未命名工程";
+            if (id === activeProjectId) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    };
+
+    window.loadSpecificProject = (id) => {
+        activeProjectId = id;
+        refreshUI();
+    };
+
+    window.addNewProject = async (name = "新工程項目", isDefault = false) => {
+        const { db, appId, doc, setDoc } = window.firebase;
+        const newId = 'prj_' + Date.now();
+        const data = { title: name, tasks: isDefault ? initialDefaultData : [] };
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'projects', newId), data);
+        activeProjectId = newId;
+    };
+
+    window.deleteCurrentProject = async () => {
+        const { db, appId, doc, deleteDoc } = window.firebase;
+        if (confirm("確定要徹底刪除此工程時程嗎？")) {
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'projects', activeProjectId));
+            activeProjectId = '';
+        }
+    };
+
+    window.handleTitleUpdate = () => {
+        const val = document.getElementById('projectName').value;
+        document.getElementById('ganttDisplayTitle').textContent = val || "未命名工程";
+        triggerCloudSave();
+    };
+
+    // --- 表格與甘特圖渲染 ---
+
+    function refreshUI() {
+        const data = projectsMap[activeProjectId];
+        if (!data) return;
+
+        document.getElementById('projectName').value = data.title || "";
+        document.getElementById('ganttDisplayTitle').textContent = data.title || "未命名工程";
+        
+        const tbody = document.getElementById('taskBody');
+        tbody.innerHTML = '';
+        (data.tasks || []).forEach((t, i) => {
+            tbody.insertAdjacentHTML('beforeend', createTaskRowHTML(t, i === 0));
+        });
+        
+        renderGantt();
+    }
+
+    function createTaskRowHTML(t, isFirst) {
+        const followChecked = t.follow ? 'checked' : '';
+        const followToggle = isFirst ? '' : `<div style="font-size:11px; margin-top:4px;"><input type="checkbox" class="t-follow" ${followChecked} onchange="triggerCloudSave()"> 接續前項</div>`;
+        
+        return `<tr>
+            <td><input type="text" class="t-name" value="${t.name || ''}" placeholder="請輸入工作細項" oninput="triggerCloudSave()"></td>
+            <td><input type="number" class="t-days" value="${t.days || 10}" oninput="triggerCloudSave()"></td>
+            <td>
+                <input type="date" class="t-start" value="${t.start || ''}" oninput="triggerCloudSave()">
+                ${followToggle}
+            </td>
+            <td class="task-end-display"></td>
+            <td>
+                <select class="t-color" onchange="triggerCloudSave()">
+                    <option value="#9b59b6" ${t.color==='#9b59b6'?'selected':''}>紫色</option>
+                    <option value="#4A90E2" ${t.color==='#4A90E2'?'selected':''}>科技藍</option>
+                    <option value="#27ae60" ${t.color==='#27ae60'?'selected':''}>森林綠</option>
+                    <option value="#f39c12" ${t.color==='#f39c12'?'selected':''}>橘色</option>
+                    <option value="#e74c3c" ${t.color==='#e74c3c'?'selected':''}>警示紅</option>
+                    <option value="#1abc9c" ${t.color==='#1abc9c'?'selected':''}>蒂芬妮綠</option>
+                    <option value="#fd79a8" ${t.color==='#fd79a8'?'selected':''}>玫瑰粉</option>
+                    <option value="#2c3e50" ${t.color==='#2c3e50'?'selected':''}>深海藍</option>
+                </select>
+            </td>
+            <td>
+                <button class="btn btn-primary btn-small" onclick="insertTaskRow(this)">插入</button>
+                <button class="btn btn-danger btn-small" onclick="removeTaskRow(this)">刪除</button>
+            </td>
+        </tr>`;
+    }
+
+    window.addTaskRow = () => {
+        document.getElementById('taskBody').insertAdjacentHTML('beforeend', createTaskRowHTML({}, false));
+        triggerCloudSave();
+    };
+
+    window.insertTaskRow = (btn) => {
+        btn.closest('tr').insertAdjacentHTML('beforebegin', createTaskRowHTML({}, false));
+        triggerCloudSave();
+    };
+
+    window.removeTaskRow = (btn) => {
+        btn.closest('tr').remove();
+        triggerCloudSave();
+    };
+
+    function triggerCloudSave() {
+        const rows = document.querySelectorAll('#taskBody tr');
+        const tasks = [];
+        rows.forEach(r => {
+            tasks.push({
+                name: r.querySelector('.t-name').value,
+                days: parseInt(r.querySelector('.t-days').value) || 0,
+                start: r.querySelector('.t-start').value,
+                follow: r.querySelector('.t-follow')?.checked || false,
+                color: r.querySelector('.t-color').value
+            });
+        });
+
+        const updatedData = {
+            title: document.getElementById('projectName').value,
+            tasks: tasks
+        };
+
+        // 防抖動儲存
+        clearTimeout(window.saveTimer);
+        window.saveTimer = setTimeout(async () => {
+            const { db, appId, doc, setDoc } = window.firebase;
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'projects', activeProjectId), updatedData);
+        }, 800);
+
+        renderGantt();
+    }
+
+    function renderGantt() {
+        const rows = document.querySelectorAll('#taskBody tr');
+        const sidebar = document.getElementById('sidebarList');
+        const bars = document.getElementById('taskBarArea');
+        const axis = document.getElementById('timeAxis');
+        const banner = document.getElementById('summaryBanner');
+        
+        sidebar.innerHTML = '';
+        bars.innerHTML = '';
+        axis.innerHTML = '';
+
+        let tasksData = [];
+        let datesPool = [];
+        let prevTaskEnd = null;
+        let pStart = null, pEnd = null;
+
+        rows.forEach((row) => {
+            const n = row.querySelector('.t-name').value;
+            const d = parseInt(row.querySelector('.t-days').value) || 0;
+            const sInp = row.querySelector('.t-start');
+            const follow = row.querySelector('.t-follow')?.checked || false;
+            const color = row.querySelector('.t-color').value;
+
+            // 自動接續邏輯：前一項完工 + 1天
+            if (follow && prevTaskEnd) {
+                const nextS = new Date(prevTaskEnd);
+                nextS.setDate(nextS.getDate() + 1);
+                const iso = nextS.toISOString().split('T')[0];
+                sInp.value = iso;
+                sInp.readOnly = true;
+                sInp.style.backgroundColor = "#f1f3f5";
+            } else {
+                sInp.readOnly = false;
+                sInp.style.backgroundColor = "";
+            }
+
+            if (sInp.value) {
+                const start = new Date(sInp.value);
+                const end = new Date(start);
+                end.setDate(start.getDate() + d);
+                
+                row.querySelector('.task-end-display').textContent = end.toISOString().split('T')[0].replace(/-/g, '/');
+                
+                tasksData.push({ name: n, start, end, days: d, color });
+                datesPool.push(start, end);
+                prevTaskEnd = end;
+
+                // 統計看板關鍵字
+                if (n.includes("設備拆除")) { if (!pStart || start < pStart) pStart = start; }
+                if (n.includes("收尾改善") || n.includes("驗收")) { if (!pEnd || end > pEnd) pEnd = end; }
+            }
+        });
+
+        if (!pStart && datesPool.length) pStart = new Date(Math.min(...datesPool));
+        if (!pEnd && datesPool.length) pEnd = new Date(Math.max(...datesPool));
+
+        if (pStart && pEnd) {
+            const total = Math.ceil((pEnd - pStart) / 86400000);
+            banner.innerHTML = `開工：${pStart.toLocaleDateString()} ~ 完工：${pEnd.toLocaleDateString()} <span style="margin-left:20px">總工期：<span class="summary-total">${total}</span> 日曆天</span>`;
+        }
+
+        if (!tasksData.length) return;
+
+        const minD = new Date(Math.min(...datesPool)); minD.setDate(1); minD.setDate(minD.getDate() - 5);
+        const maxD = new Date(Math.max(...datesPool)); maxD.setDate(maxD.getDate() + 15);
+        const totalDays = Math.ceil((maxD - minD) / 86400000);
+        const totalW = totalDays * pxPerDay;
+
+        document.getElementById('ganttChartBody').style.width = totalW + 'px';
+        axis.style.width = totalW + 'px';
+        document.getElementById('ganttGrid').style.backgroundSize = `${pxPerDay}px 100%`;
+
+        // 畫時間軸
+        for (let i = 0; i <= totalDays; i++) {
+            const cur = new Date(minD); cur.setDate(cur.getDate() + i);
+            if (cur.getDate() === 1) {
+                const ml = document.createElement('div'); ml.className = 'month-marker';
+                ml.style.left = (i * pxPerDay) + 'px'; ml.innerText = `${cur.getFullYear()}/${cur.getMonth()+1}`;
+                axis.appendChild(ml);
+            }
+            if (cur.getDate() === 1 || cur.getDate() === 15) {
+                const dl = document.createElement('div'); dl.className = 'day-marker';
+                dl.style.left = (i * pxPerDay) + 'px'; dl.innerText = cur.getDate();
+                axis.appendChild(dl);
+            }
+        }
+
+        // 畫項目與長條
+        tasksData.forEach(t => {
+            const si = document.createElement('div'); si.className = 'sidebar-task-item'; si.textContent = t.name;
+            sidebar.appendChild(si);
+
+            const row = document.createElement('div'); row.className = 'gantt-row';
+            const offset = Math.ceil((t.start - minD) / 86400000);
+            const bar = document.createElement('div'); bar.className = 'task-bar';
+            bar.style.left = (offset * pxPerDay) + 'px';
+            bar.style.width = (t.days * pxPerDay) + 'px';
+            bar.style.backgroundColor = t.color;
+            bar.textContent = t.days + '天';
+            bar.title = `${t.name}\n${t.start.toLocaleDateString()} ~ ${t.end.toLocaleDateString()}`;
+            row.appendChild(bar);
+            bars.appendChild(row);
+        });
+    }
+
+    // --- 匯出功能 (全範圍不截斷) ---
+
+    window.exportFile = async (type) => {
+        const target = document.getElementById('captureArea');
+        const scroll = document.getElementById('scrollArea');
+        const status = document.getElementById('statusMsg');
+        status.textContent = "正在處理全範圍匯出，請稍候...";
+        
+        try {
+            const fullW = target.offsetWidth - scroll.offsetWidth + scroll.scrollWidth;
+            const fullH = target.scrollHeight;
+
+            const canvas = await html2canvas(target, {
+                scale: 2, useCORS: true, backgroundColor: "#ffffff",
+                width: fullW, windowWidth: fullW,
+                onclone: (cloned) => {
+                    const cS = cloned.getElementById('scrollArea');
+                    cS.style.width = scroll.scrollWidth + "px";
+                    cS.style.overflow = "visible";
+                }
+            });
+
+            if (type === 'jpg') {
+                const link = document.createElement('a');
+                link.download = `${document.getElementById('projectName').value || '工程甘特圖'}.jpg`;
+                link.href = canvas.toDataURL("image/jpeg", 0.9);
+                link.click();
+            } else {
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width/2, canvas.height/2] });
+                pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, canvas.width/2, canvas.height/2);
+                pdf.save(`${document.getElementById('projectName').value || '工程甘特圖'}.pdf`);
+            }
+            status.textContent = "匯出成功！";
+        } catch (e) { status.textContent = "匯出失敗"; console.error(e); }
+    };
+
+</script>
+</body>
+</html>
