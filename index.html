@@ -39,18 +39,10 @@
         .task-days { color: var(--accent-red); font-weight: bold; text-align: center; }
         .task-end-display { color: #636e72; font-size: 12px; font-weight: bold; }
 
-        /* 按鈕樣式 */
-        .btn { border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
-        .btn-primary { background: #0984e3; color: white; }
-        .btn-success { background: #27ae60; color: white; }
-        .btn-danger { background: #e17055; color: white; }
-        .btn-dark { background: #2d3436; color: white; }
-        .btn-small { padding: 4px 8px; font-size: 12px; }
-        .btn:hover { opacity: 0.9; transform: translateY(-1px); }
-
         /* 看板樣式 */
-        .summary-banner { background: #fff9db; border: 2px solid #fcc419; padding: 15px; border-radius: 8px; text-align: center; font-size: 1.1rem; font-weight: bold; }
-        .summary-total { color: var(--accent-red); font-size: 1.8rem; margin: 0 10px; }
+        .summary-banner { background: #fff9db; border: 2px solid #fcc419; padding: 15px; border-radius: 8px; text-align: center; font-size: 1.1rem; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        .summary-total { color: var(--accent-red); font-size: 1.8rem; margin: 0 5px; }
+        .banner-date-input { width: 150px !important; background: white; font-weight: bold; }
 
         /* 甘特圖顯示區 */
         .gantt-section { background: white; border-radius: 10px; border: 1px solid var(--border-color); display: flex; overflow: hidden; box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
@@ -69,11 +61,20 @@
         .task-bar { position: absolute; height: 28px; border-radius: 14px; color: white; font-size: 11px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 6px rgba(0,0,0,0.15); white-space: nowrap; cursor: pointer; z-index: 2; border: 1px solid rgba(0,0,0,0.1); }
         .gantt-grid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; background-image: linear-gradient(to right, #f1f3f5 1px, transparent 1px); }
 
+        /* 按鈕樣式 */
+        .btn { border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-primary { background: #0984e3; color: white; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn-danger { background: #e17055; color: white; }
+        .btn-dark { background: #2d3436; color: white; }
+        .btn-small { padding: 4px 8px; font-size: 12px; }
+
         /* 載入中與通知 */
         .loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10000; display: none; }
         .spinner { width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
+        .status-msg { text-align: center; font-size: 12px; color: #2980b9; height: 18px; margin-top: -10px; font-weight: bold; }
         .api-config-msg { background: #e74c3c; color: white; padding: 10px; text-align: center; font-size: 14px; display: none; }
     </style>
 </head>
@@ -81,7 +82,7 @@
 
 <div id="loader" class="loader">
     <div class="spinner"></div>
-    <div id="loaderText">正在同步 Google Sheets 資料...</div>
+    <div id="loaderText">正在讀取 Google Sheets 資料...</div>
 </div>
 
 <div id="configNotice" class="api-config-msg">
@@ -129,12 +130,16 @@
         <button class="btn btn-primary" onclick="addTaskRow()">+ 新增工作細項</button>
     </div>
 
-    <!-- 統計看板 -->
-    <div id="summaryBanner" class="summary-banner">
-        正在計算工程週期...
-    </div>
-
     <div id="statusMsg" class="status-msg"></div>
+
+    <!-- 統計看板：加入日期選擇器 -->
+    <div id="summaryBanner" class="summary-banner">
+        <span>開工：</span>
+        <input type="date" id="projStartInput" class="banner-date-input" oninput="triggerCloudSave()">
+        <span style="margin: 0 10px;">~ 完工：</span>
+        <input type="date" id="projEndInput" class="banner-date-input" oninput="triggerCloudSave()">
+        <span style="margin-left:20px">總工期：<span id="totalDaysDisplay" class="summary-total">0</span> 日曆天</span>
+    </div>
 
     <!-- 甘特圖渲染區 -->
     <div id="captureArea" class="gantt-section">
@@ -146,7 +151,7 @@
             <div id="sidebarList"></div>
         </div>
         <div id="scrollArea" class="gantt-main">
-            <div id="timeAxis" class="gantt-timeline"></div>
+            <div id="timeAxis" class="time-axis"></div>
             <div id="ganttChartBody" class="gantt-body">
                 <div class="gantt-grid" id="ganttGrid"></div>
                 <div id="taskBarArea"></div>
@@ -170,36 +175,41 @@
     window.onload = async () => {
         if (!GAS_URL) {
             document.getElementById('configNotice').style.display = 'block';
-            // 載入預設資料供預覽
-            projectsMap = { 'default': { title: "範例工程", tasks: [] } };
+            projectsMap = { 'default': { title: "範例工程", tasks: [], startDate: "2026-04-01", endDate: "2027-08-15" } };
             loadSpecificProject('default');
             return;
         }
-        await fetchAllProjects();
+        await fetchAllProjects(true);
     };
 
     // --- 通訊函數 ---
-    async function apiRequest(action, data = {}) {
-        showLoader(true);
+    async function apiRequest(action, data = {}, isSilent = false) {
+        if (!isSilent) showLoader(true);
+        if (isSilent) updateStatus("雲端同步中...");
+
         try {
             const response = await fetch(GAS_URL, {
                 method: 'POST',
-                mode: 'no-cors', // 處理 GAS 重導向問題
+                mode: 'no-cors',
                 body: JSON.stringify({ action, ...data })
             });
-            // 由於 no-cors 無法讀取內容，這裡我們假設成功後直接重新獲取列表
-            await fetchAllProjects();
+            if (action !== 'save') {
+                await fetchAllProjects(isSilent);
+            } else {
+                updateStatus("✅ 已自動儲存至雲端");
+                setTimeout(() => updateStatus(""), 3000);
+            }
         } catch (e) {
             console.error("API Error:", e);
+            updateStatus("❌ 同步失敗");
         } finally {
-            showLoader(false);
+            if (!isSilent) showLoader(false);
         }
     }
 
-    async function fetchAllProjects() {
-        showLoader(true);
+    async function fetchAllProjects(showLoaderOverlay = false) {
+        if (showLoaderOverlay) showLoader(true);
         try {
-            // 使用 GET 獲取資料
             const response = await fetch(`${GAS_URL}?action=list`);
             const result = await response.json();
             projectsMap = result.data || {};
@@ -217,7 +227,7 @@
         } catch (e) {
             console.error("Fetch Error:", e);
         } finally {
-            showLoader(false);
+            if (showLoaderOverlay) showLoader(false);
         }
     }
 
@@ -245,7 +255,7 @@
         if (!name) return;
         
         const newId = 'prj_' + Date.now();
-        const data = { title: name, tasks: [] };
+        const data = { title: name, tasks: [], startDate: "", endDate: "" };
         
         if (!GAS_URL) {
             projectsMap[newId] = data;
@@ -253,7 +263,7 @@
             return;
         }
 
-        await apiRequest('save', { id: newId, data: data });
+        await apiRequest('save', { id: newId, data: data }, false);
     }
 
     async function deleteCurrentProject() {
@@ -267,7 +277,7 @@
             return;
         }
 
-        await apiRequest('delete', { id: activeProjectId });
+        await apiRequest('delete', { id: activeProjectId }, false);
         activeProjectId = '';
     }
 
@@ -285,6 +295,8 @@
 
         document.getElementById('projectName').value = data.title || "";
         document.getElementById('ganttDisplayTitle').textContent = data.title || "未命名工程";
+        document.getElementById('projStartInput').value = data.startDate || "";
+        document.getElementById('projEndInput').value = data.endDate || "";
         
         const tbody = document.getElementById('taskBody');
         tbody.innerHTML = '';
@@ -356,6 +368,8 @@
 
         const updatedData = {
             title: document.getElementById('projectName').value,
+            startDate: document.getElementById('projStartInput').value,
+            endDate: document.getElementById('projEndInput').value,
             tasks: tasks
         };
 
@@ -366,8 +380,8 @@
 
         clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
-            apiRequest('save', { id: activeProjectId, data: updatedData });
-        }, 1500);
+            apiRequest('save', { id: activeProjectId, data: updatedData }, true);
+        }, 2500);
     }
 
     function renderGantt() {
@@ -375,7 +389,6 @@
         const sidebar = document.getElementById('sidebarList');
         const bars = document.getElementById('taskBarArea');
         const axis = document.getElementById('timeAxis');
-        const banner = document.getElementById('summaryBanner');
         
         sidebar.innerHTML = '';
         bars.innerHTML = '';
@@ -384,7 +397,20 @@
         let tasksData = [];
         let datesPool = [];
         let prevTaskEnd = null;
-        let pStart = null, pEnd = null;
+
+        // 計算專案總工期
+        const pStartStr = document.getElementById('projStartInput').value;
+        const pEndStr = document.getElementById('projEndInput').value;
+        const totalDaysDisplay = document.getElementById('totalDaysDisplay');
+
+        if (pStartStr && pEndStr) {
+            const start = new Date(pStartStr);
+            const end = new Date(pEndStr);
+            const diff = Math.ceil((end - start) / 86400000);
+            totalDaysDisplay.textContent = diff >= 0 ? diff : 0;
+        } else {
+            totalDaysDisplay.textContent = 0;
+        }
 
         rows.forEach((row) => {
             const n = row.querySelector('.t-name').value;
@@ -413,21 +439,14 @@
                 tasksData.push({ name: n, start, end, days: d, color });
                 datesPool.push(start, end);
                 prevTaskEnd = end;
-
-                if (n.includes("設備拆除")) if (!pStart || start < pStart) pStart = start;
-                if (n.includes("收尾改善") || n.includes("驗收")) if (!pEnd || end > pEnd) pEnd = end;
             }
         });
 
-        if (!pStart && datesPool.length) pStart = new Date(Math.min(...datesPool));
-        if (!pEnd && datesPool.length) pEnd = new Date(Math.max(...datesPool));
+        // 甘特圖時間軸範圍仍以任務日期為準 (或加上手選日期)
+        if (pStartStr) datesPool.push(new Date(pStartStr));
+        if (pEndStr) datesPool.push(new Date(pEndStr));
 
-        if (pStart && pEnd) {
-            const total = Math.ceil((pEnd - pStart) / 86400000);
-            banner.innerHTML = `開工：${pStart.toLocaleDateString()} ~ 完工：${pEnd.toLocaleDateString()} <span style="margin-left:20px">總工期：<span class="summary-total">${total}</span> 日曆天</span>`;
-        }
-
-        if (!tasksData.length) return;
+        if (!datesPool.length) return;
 
         const minD = new Date(Math.min(...datesPool)); minD.setDate(1); minD.setDate(minD.getDate() - 5);
         const maxD = new Date(Math.max(...datesPool)); maxD.setDate(maxD.getDate() + 15);
@@ -468,8 +487,6 @@
         });
     }
 
-    // --- 匯出功能 ---
-
     async function exportFile(type) {
         const target = document.getElementById('captureArea');
         const scroll = document.getElementById('scrollArea');
@@ -502,6 +519,10 @@
 
     function showLoader(show) {
         document.getElementById('loader').style.display = show ? 'flex' : 'none';
+    }
+
+    function updateStatus(text) {
+        document.getElementById('statusMsg').innerText = text;
     }
 </script>
 </body>
