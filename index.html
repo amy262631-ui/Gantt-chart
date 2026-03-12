@@ -3,28 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>專業雲端工程甘特圖管理系統</title>
+    <title>專業 Google Sheets 工程甘特圖管理系統</title>
     <!-- 匯出與 Canvas 處理函式庫 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     
-    <!-- Firebase 模組化載入 -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // 環境變數讀取
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'gantt-pro-tool';
-
-        // 將必要工具掛載至 window 供全域使用
-        window.firebase = { db, auth, appId, doc, setDoc, getDoc, collection, query, onSnapshot, deleteDoc, signInAnonymously, signInWithCustomToken };
-    </script>
-
     <style>
         :root {
             --primary-bg: #f8f9fa;
@@ -86,26 +69,32 @@
         .task-bar { position: absolute; height: 28px; border-radius: 14px; color: white; font-size: 11px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 6px rgba(0,0,0,0.15); white-space: nowrap; cursor: pointer; z-index: 2; border: 1px solid rgba(0,0,0,0.1); }
         .gantt-grid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; background-image: linear-gradient(to right, #f1f3f5 1px, transparent 1px); }
 
-        /* 載入中 */
-        .loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10000; }
+        /* 載入中與通知 */
+        .loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10000; display: none; }
         .spinner { width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .api-config-msg { background: #e74c3c; color: white; padding: 10px; text-align: center; font-size: 14px; display: none; }
     </style>
 </head>
 <body>
 
 <div id="loader" class="loader">
     <div class="spinner"></div>
-    <div id="loaderText">正在讀取雲端工程資料...</div>
+    <div id="loaderText">正在同步 Google Sheets 資料...</div>
+</div>
+
+<div id="configNotice" class="api-config-msg">
+    ⚠️ 尚未設定 Google Sheets API URL。請先部署 Apps Script 並填入程式碼中的 GAS_URL。
 </div>
 
 <header class="app-header">
     <div style="display: flex; align-items: center; gap: 15px;">
-        <h1 style="margin: 0; font-size: 1.4rem;">🏗️ 工程時程管理系統</h1>
+        <h1 style="margin: 0; font-size: 1.4rem;">🏗️ Google Sheets 甘特圖系統</h1>
     </div>
     <div class="export-actions">
-        <button class="btn btn-dark" onclick="exportFile('jpg')">🖼️ 匯出 JPG 圖片</button>
-        <button class="btn btn-dark" onclick="exportFile('pdf')">📄 匯出 PDF 報告</button>
+        <button class="btn btn-dark" onclick="exportFile('jpg')">🖼️ 匯出 JPG</button>
+        <button class="btn btn-dark" onclick="exportFile('pdf')">📄 匯出 PDF</button>
     </div>
 </header>
 
@@ -114,15 +103,15 @@
     <div class="project-nav">
         <strong>工程切換：</strong>
         <select id="projectSelect" class="project-select" onchange="loadSpecificProject(this.value)">
-            <option value="">載入中...</option>
+            <option value="">請先新增工程...</option>
         </select>
-        <button class="btn btn-success" onclick="addNewProject()">+ 新增工程</button>
+        <button class="btn btn-success" onclick="addNewProjectPrompt()">+ 新增工程</button>
         <button class="btn btn-danger" onclick="deleteCurrentProject()">🗑️ 刪除專案</button>
     </div>
 
     <!-- 編輯區域 -->
     <div class="editor-card">
-        <input type="text" id="projectName" class="project-title-input" placeholder="請輸入工程名稱 (將同步顯示於甘特圖)" oninput="handleTitleUpdate()">
+        <input type="text" id="projectName" class="project-title-input" placeholder="請輸入工程名稱" oninput="handleTitleUpdate()">
         
         <table id="taskTable">
             <thead>
@@ -131,7 +120,7 @@
                     <th style="width: 8%;">預估天數</th>
                     <th style="width: 20%;">起始日期</th>
                     <th style="width: 15%;">完成日期</th>
-                    <th style="width: 12%;">長條顏色</th>
+                    <th style="width: 12%;">顏色</th>
                     <th style="width: 18%;">操作</th>
                 </tr>
             </thead>
@@ -144,6 +133,8 @@
     <div id="summaryBanner" class="summary-banner">
         正在計算工程週期...
     </div>
+
+    <div id="statusMsg" class="status-msg"></div>
 
     <!-- 甘特圖渲染區 -->
     <div id="captureArea" class="gantt-section">
@@ -164,69 +155,75 @@
     </div>
 </div>
 
-<script type="module">
-    // --- 核心變數 ---
+<script>
+    /** * --- 重要說明 ---
+     * 請先將下方的「GAS_URL」替換為你在 Google Apps Script 部署後的 Web App URL。
+     */
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbxTrH265MyAR3MGE-4SspcdH1W2utoY4uF56W1CQGUPJLQkK0r8IyhZewoELm7UZ9AY/exec"; 
+
     let activeProjectId = '';
     let projectsMap = {};
-    const pxPerDay = 2.2; // 壓縮橫向比例，利於全範圍匯出顯示
+    const pxPerDay = 2.2;
+    let saveTimeout = null;
 
-    // 預設資料集 (初始化用)
-    const initialDefaultData = [
-        { name: "量測與配置設計規劃", days: 15, start: "2026-04-01", follow: false, color: "#9b59b6" },
-        { name: "土木設計+技師:施工圖", days: 30, start: "", follow: true, color: "#9b59b6" },
-        { name: "設備施工圖", days: 45, start: "", follow: true, color: "#9b59b6" },
-        { name: "設備拆除 3-(完成拌合系統拆除)", days: 20, start: "2026-06-01", follow: false, color: "#f39c12" },
-        { name: "土木拆除", days: 30, start: "", follow: true, color: "#f39c12" },
-        { name: "土木完成", days: 60, start: "", follow: true, color: "#27ae60" },
-        { name: "製作圖 材料購買、製作 2-(原料採購後廠驗)", days: 120, start: "2026-06-21", follow: false, color: "#4A90E2" },
-        { name: "安裝完成 (完成拌合系統主結構定位)", days: 240, start: "", follow: true, color: "#2c3e50" },
-        { name: "試運轉出料 (完成儀控定位及試運轉)", days: 30, start: "", follow: true, color: "#e74c3c" },
-        { name: "收尾改善缺失 (驗收完成)", days: 60, start: "", follow: true, color: "#fd79a8" }
-    ];
+    // --- 初始化 ---
+    window.onload = async () => {
+        if (!GAS_URL) {
+            document.getElementById('configNotice').style.display = 'block';
+            // 載入預設資料供預覽
+            projectsMap = { 'default': { title: "範例工程", tasks: [] } };
+            loadSpecificProject('default');
+            return;
+        }
+        await fetchAllProjects();
+    };
 
-    // --- Firebase 初始化流程 ---
-    window.addEventListener('load', async () => {
-        const { auth, db, appId, signInAnonymously, signInWithCustomToken, collection, onSnapshot } = window.firebase;
-        
+    // --- 通訊函數 ---
+    async function apiRequest(action, data = {}) {
+        showLoader(true);
         try {
-            // 規則 3: 先驗證
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
-            }
-
-            // 規則 1: 嚴格路徑
-            const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'projects');
-
-            // 實時監聽資料庫
-            onSnapshot(colRef, (snapshot) => {
-                projectsMap = {};
-                snapshot.forEach(doc => projectsMap[doc.id] = doc.data());
-                
-                updateSelectorUI();
-                
-                if (!activeProjectId || !projectsMap[activeProjectId]) {
-                    const keys = Object.keys(projectsMap);
-                    if (keys.length > 0) {
-                        loadSpecificProject(keys[0]);
-                    } else {
-                        addNewProject("新工程項目", true);
-                    }
-                } else {
-                    refreshUI();
-                }
-                document.getElementById('loader').style.display = 'none';
-            }, (err) => {
-                document.getElementById('loaderText').innerText = "雲端權限錯誤，請檢查配置";
+            const response = await fetch(GAS_URL, {
+                method: 'POST',
+                mode: 'no-cors', // 處理 GAS 重導向問題
+                body: JSON.stringify({ action, ...data })
             });
+            // 由於 no-cors 無法讀取內容，這裡我們假設成功後直接重新獲取列表
+            await fetchAllProjects();
+        } catch (e) {
+            console.error("API Error:", e);
+        } finally {
+            showLoader(false);
+        }
+    }
 
-        } catch (e) { console.error(e); }
-    });
+    async function fetchAllProjects() {
+        showLoader(true);
+        try {
+            // 使用 GET 獲取資料
+            const response = await fetch(`${GAS_URL}?action=list`);
+            const result = await response.json();
+            projectsMap = result.data || {};
+            
+            updateSelectorUI();
+            
+            if (!activeProjectId || !projectsMap[activeProjectId]) {
+                const keys = Object.keys(projectsMap);
+                if (keys.length > 0) {
+                    loadSpecificProject(keys[0]);
+                }
+            } else {
+                refreshUI();
+            }
+        } catch (e) {
+            console.error("Fetch Error:", e);
+        } finally {
+            showLoader(false);
+        }
+    }
 
-    // --- 專案邏輯 ---
+    // --- 專案管理 ---
 
-    window.updateSelectorUI = () => {
+    function updateSelectorUI() {
         const sel = document.getElementById('projectSelect');
         sel.innerHTML = '';
         Object.keys(projectsMap).forEach(id => {
@@ -236,36 +233,51 @@
             if (id === activeProjectId) opt.selected = true;
             sel.appendChild(opt);
         });
-    };
+    }
 
-    window.loadSpecificProject = (id) => {
+    function loadSpecificProject(id) {
         activeProjectId = id;
         refreshUI();
-    };
+    }
 
-    window.addNewProject = async (name = "新工程項目", isDefault = false) => {
-        const { db, appId, doc, setDoc } = window.firebase;
+    async function addNewProjectPrompt() {
+        const name = prompt("請輸入新工程名稱：", "新工程項目");
+        if (!name) return;
+        
         const newId = 'prj_' + Date.now();
-        const data = { title: name, tasks: isDefault ? initialDefaultData : [] };
-        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'projects', newId), data);
-        activeProjectId = newId;
-    };
-
-    window.deleteCurrentProject = async () => {
-        const { db, appId, doc, deleteDoc } = window.firebase;
-        if (confirm("確定要徹底刪除此工程時程嗎？")) {
-            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'projects', activeProjectId));
-            activeProjectId = '';
+        const data = { title: name, tasks: [] };
+        
+        if (!GAS_URL) {
+            projectsMap[newId] = data;
+            loadSpecificProject(newId);
+            return;
         }
-    };
 
-    window.handleTitleUpdate = () => {
+        await apiRequest('save', { id: newId, data: data });
+    }
+
+    async function deleteCurrentProject() {
+        if (!activeProjectId) return;
+        if (!confirm("確定要徹底刪除此工程時程嗎？資料庫中的資料將同步移除。")) return;
+        
+        if (!GAS_URL) {
+            delete projectsMap[activeProjectId];
+            activeProjectId = '';
+            updateSelectorUI();
+            return;
+        }
+
+        await apiRequest('delete', { id: activeProjectId });
+        activeProjectId = '';
+    }
+
+    function handleTitleUpdate() {
         const val = document.getElementById('projectName').value;
         document.getElementById('ganttDisplayTitle').textContent = val || "未命名工程";
         triggerCloudSave();
-    };
+    }
 
-    // --- 表格與甘特圖渲染 ---
+    // --- 渲染邏輯 ---
 
     function refreshUI() {
         const data = projectsMap[activeProjectId];
@@ -288,7 +300,7 @@
         const followToggle = isFirst ? '' : `<div style="font-size:11px; margin-top:4px;"><input type="checkbox" class="t-follow" ${followChecked} onchange="triggerCloudSave()"> 接續前項</div>`;
         
         return `<tr>
-            <td><input type="text" class="t-name" value="${t.name || ''}" placeholder="請輸入工作細項" oninput="triggerCloudSave()"></td>
+            <td><input type="text" class="t-name" value="${t.name || ''}" placeholder="工作項目..." oninput="triggerCloudSave()"></td>
             <td><input type="number" class="t-days" value="${t.days || 10}" oninput="triggerCloudSave()"></td>
             <td>
                 <input type="date" class="t-start" value="${t.start || ''}" oninput="triggerCloudSave()">
@@ -298,13 +310,13 @@
             <td>
                 <select class="t-color" onchange="triggerCloudSave()">
                     <option value="#9b59b6" ${t.color==='#9b59b6'?'selected':''}>紫色</option>
-                    <option value="#4A90E2" ${t.color==='#4A90E2'?'selected':''}>科技藍</option>
-                    <option value="#27ae60" ${t.color==='#27ae60'?'selected':''}>森林綠</option>
+                    <option value="#4A90E2" ${t.color==='#4A90E2'?'selected':''}>藍色</option>
+                    <option value="#27ae60" ${t.color==='#27ae60'?'selected':''}>綠色</option>
                     <option value="#f39c12" ${t.color==='#f39c12'?'selected':''}>橘色</option>
-                    <option value="#e74c3c" ${t.color==='#e74c3c'?'selected':''}>警示紅</option>
-                    <option value="#1abc9c" ${t.color==='#1abc9c'?'selected':''}>蒂芬妮綠</option>
-                    <option value="#fd79a8" ${t.color==='#fd79a8'?'selected':''}>玫瑰粉</option>
-                    <option value="#2c3e50" ${t.color==='#2c3e50'?'selected':''}>深海藍</option>
+                    <option value="#e74c3c" ${t.color==='#e74c3c'?'selected':''}>紅色</option>
+                    <option value="#1abc9c" ${t.color==='#1abc9c'?'selected':''}>青色</option>
+                    <option value="#fd79a8" ${t.color==='#fd79a8'?'selected':''}>粉色</option>
+                    <option value="#2c3e50" ${t.color==='#2c3e50'?'selected':''}>深色</option>
                 </select>
             </td>
             <td>
@@ -314,20 +326,20 @@
         </tr>`;
     }
 
-    window.addTaskRow = () => {
+    function addTaskRow() {
         document.getElementById('taskBody').insertAdjacentHTML('beforeend', createTaskRowHTML({}, false));
         triggerCloudSave();
-    };
+    }
 
-    window.insertTaskRow = (btn) => {
+    function insertTaskRow(btn) {
         btn.closest('tr').insertAdjacentHTML('beforebegin', createTaskRowHTML({}, false));
         triggerCloudSave();
-    };
+    }
 
-    window.removeTaskRow = (btn) => {
+    function removeTaskRow(btn) {
         btn.closest('tr').remove();
         triggerCloudSave();
-    };
+    }
 
     function triggerCloudSave() {
         const rows = document.querySelectorAll('#taskBody tr');
@@ -347,14 +359,15 @@
             tasks: tasks
         };
 
-        // 防抖動儲存
-        clearTimeout(window.saveTimer);
-        window.saveTimer = setTimeout(async () => {
-            const { db, appId, doc, setDoc } = window.firebase;
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'projects', activeProjectId), updatedData);
-        }, 800);
-
+        projectsMap[activeProjectId] = updatedData;
         renderGantt();
+
+        if (!GAS_URL) return;
+
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+            apiRequest('save', { id: activeProjectId, data: updatedData });
+        }, 1500);
     }
 
     function renderGantt() {
@@ -380,12 +393,10 @@
             const follow = row.querySelector('.t-follow')?.checked || false;
             const color = row.querySelector('.t-color').value;
 
-            // 自動接續邏輯：前一項完工 + 1天
             if (follow && prevTaskEnd) {
                 const nextS = new Date(prevTaskEnd);
                 nextS.setDate(nextS.getDate() + 1);
-                const iso = nextS.toISOString().split('T')[0];
-                sInp.value = iso;
+                sInp.value = nextS.toISOString().split('T')[0];
                 sInp.readOnly = true;
                 sInp.style.backgroundColor = "#f1f3f5";
             } else {
@@ -399,14 +410,12 @@
                 end.setDate(start.getDate() + d);
                 
                 row.querySelector('.task-end-display').textContent = end.toISOString().split('T')[0].replace(/-/g, '/');
-                
                 tasksData.push({ name: n, start, end, days: d, color });
                 datesPool.push(start, end);
                 prevTaskEnd = end;
 
-                // 統計看板關鍵字
-                if (n.includes("設備拆除")) { if (!pStart || start < pStart) pStart = start; }
-                if (n.includes("收尾改善") || n.includes("驗收")) { if (!pEnd || end > pEnd) pEnd = end; }
+                if (n.includes("設備拆除")) if (!pStart || start < pStart) pStart = start;
+                if (n.includes("收尾改善") || n.includes("驗收")) if (!pEnd || end > pEnd) pEnd = end;
             }
         });
 
@@ -429,7 +438,6 @@
         axis.style.width = totalW + 'px';
         document.getElementById('ganttGrid').style.backgroundSize = `${pxPerDay}px 100%`;
 
-        // 畫時間軸
         for (let i = 0; i <= totalDays; i++) {
             const cur = new Date(minD); cur.setDate(cur.getDate() + i);
             if (cur.getDate() === 1) {
@@ -444,7 +452,6 @@
             }
         }
 
-        // 畫項目與長條
         tasksData.forEach(t => {
             const si = document.createElement('div'); si.className = 'sidebar-task-item'; si.textContent = t.name;
             sidebar.appendChild(si);
@@ -456,24 +463,19 @@
             bar.style.width = (t.days * pxPerDay) + 'px';
             bar.style.backgroundColor = t.color;
             bar.textContent = t.days + '天';
-            bar.title = `${t.name}\n${t.start.toLocaleDateString()} ~ ${t.end.toLocaleDateString()}`;
             row.appendChild(bar);
             bars.appendChild(row);
         });
     }
 
-    // --- 匯出功能 (全範圍不截斷) ---
+    // --- 匯出功能 ---
 
-    window.exportFile = async (type) => {
+    async function exportFile(type) {
         const target = document.getElementById('captureArea');
         const scroll = document.getElementById('scrollArea');
-        const status = document.getElementById('statusMsg');
-        status.textContent = "正在處理全範圍匯出，請稍候...";
+        const fullW = target.offsetWidth - scroll.offsetWidth + scroll.scrollWidth;
         
         try {
-            const fullW = target.offsetWidth - scroll.offsetWidth + scroll.scrollWidth;
-            const fullH = target.scrollHeight;
-
             const canvas = await html2canvas(target, {
                 scale: 2, useCORS: true, backgroundColor: "#ffffff",
                 width: fullW, windowWidth: fullW,
@@ -495,10 +497,12 @@
                 pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, canvas.width/2, canvas.height/2);
                 pdf.save(`${document.getElementById('projectName').value || '工程甘特圖'}.pdf`);
             }
-            status.textContent = "匯出成功！";
-        } catch (e) { status.textContent = "匯出失敗"; console.error(e); }
-    };
+        } catch (e) { console.error(e); }
+    }
 
+    function showLoader(show) {
+        document.getElementById('loader').style.display = show ? 'flex' : 'none';
+    }
 </script>
 </body>
 </html>
