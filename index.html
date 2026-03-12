@@ -15,6 +15,7 @@
             --accent-red: #d63031;
             --highlight-yellow: #fff9db;
             --border-color: #dee2e6;
+            --header-height: 90px; /* 統一標題高度 */
         }
 
         body { font-family: "Microsoft JhengHei", system-ui, sans-serif; margin: 0; background: var(--primary-bg); color: #2d3436; }
@@ -46,19 +47,23 @@
 
         /* 甘特圖顯示區 */
         .gantt-section { background: white; border-radius: 10px; border: 1px solid var(--border-color); display: flex; overflow: hidden; box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
+        
+        /* 左側 Sidebar */
         .gantt-sidebar { width: var(--sidebar-width); flex-shrink: 0; background: #f8f9fa; border-right: 2px solid #2d3436; z-index: 5; }
-        .gantt-sidebar-header { height: 90px; background: #e9ecef; border-bottom: 2px solid #2d3436; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px; text-align: center; }
+        .gantt-sidebar-header { height: var(--header-height); background: #e9ecef; border-bottom: 2px solid #2d3436; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px; text-align: center; box-sizing: border-box; }
         .gantt-project-name { color: #e67e22; font-weight: bold; font-size: 14px; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         
-        .gantt-main { flex-grow: 1; overflow-x: auto; position: relative; }
-        .gantt-timeline { height: 90px; position: relative; border-bottom: 2px solid #2d3436; background: white; }
-        .month-marker { position: absolute; top: 8px; border-left: 1px solid #adb5bd; padding-left: 6px; font-weight: bold; font-size: 13px; color: #212529; }
+        /* 右側捲動區 */
+        .gantt-main { flex-grow: 1; overflow-x: auto; position: relative; display: flex; flex-direction: column; } /* 強制垂直排列 */
+        .gantt-timeline { height: var(--header-height); position: relative; border-bottom: 2px solid #2d3436; background: white; flex-shrink: 0; }
+        .month-marker { position: absolute; top: 8px; border-left: 1px solid #adb5bd; padding-left: 6px; font-weight: bold; font-size: 13px; color: #212529; white-space: nowrap; }
         .day-marker { position: absolute; bottom: 8px; font-size: 10px; color: #868e96; transform: scale(0.9); }
 
+        .gantt-body { position: relative; flex-grow: 1; }
         .gantt-row { height: 45px; border-bottom: 1px solid #f1f3f5; position: relative; display: flex; align-items: center; }
-        .sidebar-task-item { height: 45px; display: flex; align-items: center; padding: 0 15px; border-bottom: 1px solid #f1f3f5; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sidebar-task-item { height: 45px; display: flex; align-items: center; padding: 0 15px; border-bottom: 1px solid #f1f3f5; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }
         
-        .task-bar { position: absolute; height: 28px; border-radius: 14px; color: white; font-size: 11px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 6px rgba(0,0,0,0.15); white-space: nowrap; cursor: pointer; z-index: 2; border: 1px solid rgba(0,0,0,0.1); }
+        .task-bar { position: absolute; height: 28px; border-radius: 14px; color: white; font-size: 11px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 6px rgba(0,0,0,0.15); white-space: nowrap; cursor: pointer; z-index: 2; border: 1px solid rgba(0,0,0,0.1); top: 8px; }
         .gantt-grid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; background-image: linear-gradient(to right, #f1f3f5 1px, transparent 1px); }
 
         /* 按鈕樣式 */
@@ -69,7 +74,7 @@
         .btn-dark { background: #2d3436; color: white; }
         .btn-small { padding: 4px 8px; font-size: 12px; }
 
-        /* 載入中與通知 */
+        /* 載入中 */
         .loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10000; display: none; }
         .spinner { width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -132,7 +137,7 @@
 
     <div id="statusMsg" class="status-msg"></div>
 
-    <!-- 統計看板：加入日期選擇器 -->
+    <!-- 統計看板 -->
     <div id="summaryBanner" class="summary-banner">
         <span>開工：</span>
         <input type="date" id="projStartInput" class="banner-date-input" oninput="triggerCloudSave()">
@@ -143,7 +148,7 @@
 
     <!-- 甘特圖渲染區 -->
     <div id="captureArea" class="gantt-section">
-        <div class="gantt-sidebar">
+        <div id="ganttSidebar" class="gantt-sidebar">
             <div class="gantt-sidebar-header">
                 <div id="ganttDisplayTitle" class="gantt-project-name">未命名工程</div>
                 <div style="font-size: 12px; color: #495057;">工作清單項目</div>
@@ -386,12 +391,12 @@
 
     function renderGantt() {
         const rows = document.querySelectorAll('#taskBody tr');
-        const sidebar = document.getElementById('sidebarList');
-        const bars = document.getElementById('taskBarArea');
+        const sidebarList = document.getElementById('sidebarList');
+        const barsArea = document.getElementById('taskBarArea');
         const axis = document.getElementById('timeAxis');
         
-        sidebar.innerHTML = '';
-        bars.innerHTML = '';
+        sidebarList.innerHTML = '';
+        barsArea.innerHTML = '';
         axis.innerHTML = '';
 
         let tasksData = [];
@@ -442,7 +447,6 @@
             }
         });
 
-        // 甘特圖時間軸範圍仍以任務日期為準 (或加上手選日期)
         if (pStartStr) datesPool.push(new Date(pStartStr));
         if (pEndStr) datesPool.push(new Date(pEndStr));
 
@@ -457,6 +461,7 @@
         axis.style.width = totalW + 'px';
         document.getElementById('ganttGrid').style.backgroundSize = `${pxPerDay}px 100%`;
 
+        // 畫時間軸
         for (let i = 0; i <= totalDays; i++) {
             const cur = new Date(minD); cur.setDate(cur.getDate() + i);
             if (cur.getDate() === 1) {
@@ -471,9 +476,10 @@
             }
         }
 
+        // 畫項目與長條
         tasksData.forEach(t => {
             const si = document.createElement('div'); si.className = 'sidebar-task-item'; si.textContent = t.name;
-            sidebar.appendChild(si);
+            sidebarList.appendChild(si);
 
             const row = document.createElement('div'); row.className = 'gantt-row';
             const offset = Math.ceil((t.start - minD) / 86400000);
@@ -483,7 +489,7 @@
             bar.style.backgroundColor = t.color;
             bar.textContent = t.days + '天';
             row.appendChild(bar);
-            bars.appendChild(row);
+            barsArea.appendChild(row);
         });
     }
 
