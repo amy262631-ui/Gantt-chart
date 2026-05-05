@@ -1,651 +1,663 @@
+
+Claude finished the response
+You said: 這個網站 能否可以選擇排入日期 與有時候只寫天數
+
+<!DOCTYPE html> <html lang="zh-TW"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>工程甘特圖管理系統</title> <!-- 匯出與 Canvas 處理函式庫 --> <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.m
+
+pasted
+
+這個網站 能否可以選擇排入日期 與有時候只寫天數
+
+上午8:56
+Claude responded: 我理解你的需求了。目前系統的「起始日期」是必填的，你希望：
+我理解你的需求了。目前系統的「起始日期」是必填的，你希望：
+
+可以選擇只輸入天數，讓系統自動從前一項結束日接續
+或者指定起始日期，照原本方式運作
+我來改良這個表格的日期邏輯，讓操作更彈性：
+
+
+
+這是改良後的日期模式示範。每一筆工作現在有三種模式可選：
+
+📅 指定日期 — 手動填入起始日，跟原本一樣，適合有固定開工時間的工項（例如材料到貨日）
+
+🔗 接續前項 — 不用填日期，自動接在「上一筆有日期的工作」結束後的隔天
+
+⏭ 接續上項 — 嚴格接在緊鄰的上一筆工作結束後，跟「接續前項」的差別在於中間若有跳號也不影響
+
+要把這個邏輯整合回你原本那份完整系統（含 Google Sheets 同步、匯出 JPG/PDF），需要調整以下幾個地方：
+
+createTaskRowHTML — 把起始日期欄改成「模式選單 + 條件顯示日期輸入」
+triggerCloudSave 的 tasks 資料結構加入 mode 欄位
+renderGantt 的日期計算邏輯換成三種模式的判斷
+需要我直接幫你產出整合好的完整 HTML 檔案嗎？
+
+You said: 應該是說 有的甘特圖不要有起始日期 反正只是排天數工期
+應該是說 有的甘特圖不要有起始日期 反正只是排天數工期
+
+上午8:59
+Claude responded: 了解！就是有些工程只想看各項工期佔比和順序，不需要綁定實際日期，純粹用天數排列。
+了解！就是有些工程只想看各項工期佔比和順序，不需要綁定實際日期，純粹用天數排列。
+
+我來做一個支援「純天數模式」的版本：
+
+
+
+這樣就清楚多了！兩種模式切換：
+
+📊 純天數模式 — 完全不需要日期，就是填每個工項幾天，甘特圖自動依比例排列，適合還在規劃階段、或只想呈現工序與工期長短
+
+📅 指定日期模式 — 填入工程開始日，所有工項自動往後推算，甘特圖上會顯示實際月/日
+
+要把這個整合進你原本那份系統（連接 Google Sheets 的版本），我可以幫你改成：每個「專案」可以選擇要不要啟用日期，純天數的就不用填任何日期。需要的話告訴我！
+
+You said: 可 就是新增完工程名稱 就能選擇要哪種模式
+可 就是新增完工程名稱 就能選擇要哪種模式
+
+上午9:00
+Claude responded: 好的，我來做一個完整的版本，新增工程後先選模式再填工項： 完成了！流程如下：
+好的，我來做一個完整的版本，新增工程後先選模式再填工項：
+
+
+
+完成了！流程如下：
+
+點「＋ 新增工程」 → 輸入工程名稱
+選擇模式：
+📊 純天數 — 只填幾天，甘特圖按比例顯示
+📅 日期模式 — 填開始日，各工項自動推算實際日期
+填入工作項目，甘特圖即時更新
+另外還有：
+
+切換模式 按鈕可以隨時更換（會提示確認）
+接續前項 勾選後起始日自動計算，不用手填
+多個工程可以同時存在，上方下拉選單切換
+要整合回你的 Google Sheets 版本的話，告訴我！
+
+function doGet(e) {
+  var action = e.parameter.action;
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  
+  if (action === 'list') {
+    var data = sheet.getDataRange().getValues();
+    var result = {};
+    // 從試算表中讀取 JSON 格式的專案資料
+    for (var i = 0; i < data.length; i++) {
+      if (data[i][0] && data[i][1]) {
+        try {
+          result[data[i][0]] = JSON.parse(data[i][1]);
+        } catch(err) {}
+      }
+    }
+    return ContentService.createTextOutput(JSON.stringify({data: result}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doPost(e) {
+  var params = JSON.parse(e.postData.contents);
+  var action = params.action;
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var data = sheet.getDataRange().getValues();
+  
+  if (action === 'save') {
+    var projectId = params.id;
+    var projectData = JSON.stringify(params.data);
+    var found = false;
+    
+    // 尋找現有專案並更新，否則新增一行
+    for (var i = 0; i < data.length; i++) {
+      if (data[i][0] === projectId) {
+        sheet.getRange(i + 1, 2).setValue(projectData);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      sheet.appendRow([projectId, projectData]);
+    }
+    return ContentService.createTextOutput("Success");
+  }
+  
+  if (action === 'delete') {
+    var projectId = params.id;
+    for (var i = 0; i < data.length; i++) {
+      if (data[i][0] === projectId) {
+        sheet.deleteRow(i + 1);
+        break;
+      }
+    }
+    return ContentService.createTextOutput("Deleted");
+  }
+}
+Show more
+上午9:04
+Claude responded: 你的 Apps Script 後端完全不需要改動，資料結構已經夠用了。
+你的 Apps Script 後端完全不需要改動，資料結構已經夠用了。
+
+只需要把前端 HTML 整合進去，我來幫你產出完整版：
+
+
+Viewed a file, created a file, read a file
+Viewed a file, created a file, read a file
+完成！Apps Script 那邊完全不用動，只有前端換掉。
+
+使用流程：
+
+點「＋ 新增工程」→ 輸入名稱
+跳出選擇畫面 → 點「📊 純天數模式」或「📅 日期模式」
+填入工作項目，甘特圖即時更新
+2 秒後自動同步到 Google Sheets
+兩種模式差異：
+
+📊 純天數 — 只填天數，甘特圖按比例排列，不顯示任何日期
+📅 日期模式 — 填開始日，可勾「接續前項」讓日期自動串接
+**其他功能保留：**匯出 JPG / PDF、插入 / 刪除工項、切換模式（會提示確認）、多工程管理。
+
+
+Gantt system
+Code · HTML 
+You said: 我改完 要把我歷史資料 留存著 目前進去都空白
+我改完 要把我歷史資料 留存著 目前進去都空白
+
+上午9:23
+Claude responded: 你的問題是：用 no-cors 模式發 POST 沒辦法拿到回應，但 GET 讀取是正常的。所以歷史資料還在 Google Sheets，只是新程式碼沒有正確讀進來。
+你的問題是：用 no-cors 模式發 POST 沒辦法拿到回應，但 GET 讀取是正常的。所以歷史資料還在 Google Sheets，只是新程式碼沒有正確讀進來。
+
+讓我先幫你診斷一下：
+
+
+
+先點「🔍 診斷」看看結果，通常空白的原因是以下其中一個：
+
+情況 A — 「專案數量：0 個」 代表連線正常，但試算表裡的舊資料欄位格式跟新程式不符。舊版可能存的是別的欄位名稱（例如 title 而非 name），需要做一次相容性轉換。
+
+情況 B — JSON 解析失敗 Apps Script 回傳的不是 JSON，通常是部署設定問題，要重新部署一版並確認「執行身分」和「存取權限」。
+
+情況 C — 連線失敗 網址錯誤或未公開部署。
+
+把診斷結果貼給我，我幫你對症修正！
+
+You said: ❌ 連線失敗：Failed to fetch 可能原因： • Apps Script 尚未部署為「任何人可存取」 • 網址有誤
+❌ 連線失敗：Failed to fetch  可能原因： • Apps Script 尚未部署為「任何人可存取」 • 網址有誤
+
+上午9:24
+Claude responded: 這是 CORS 跨域問題，瀏覽器擋住了，不是網址錯或部署錯。
+這是 CORS 跨域問題，瀏覽器擋住了，不是網址錯或部署錯。
+
+Apps Script 本身沒問題，只是要在部署設定裡確認一個選項：
+
+
+
+關鍵就是第 3 步，「存取權限」從「僅限自己」改成「所有人」，這樣瀏覽器才能直接呼叫 API。
+
+改完重新部署後，歷史資料完全不會動，都還在試算表裡，程式會自動讀回來。完成後再跑一次診斷工具確認看看！
+
+
+
+Want to be notified when Claude responds?
+
+
+
+Claude is AI and can make mistakes. Please double-check responses.
+Pasted content
+23.81 KB •457 lines
+•
+Formatting may be inconsistent from source
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>工程甘特圖管理系統</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<style>
-:root {
-  --sidebar-w: 180px;
-  --header-h: 90px;
-  --px-day: 2.4;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: "Microsoft JhengHei", system-ui, sans-serif; background: #f4f6f8; color: #2d3436; font-size: 14px; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工程甘特圖管理系統</title>
+    <!-- 匯出與 Canvas 處理函式庫 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <style>
+        :root {
+            --primary-bg: #f8f9fa;
+            --sidebar-width: 280px;
+            --accent-red: #d63031;
+            --highlight-yellow: #fff9db;
+            --border-color: #dee2e6;
+            --header-height: 95px; /* 增加高度以容納標籤 */
+        }
 
-/* ── 載入遮罩 ── */
-#loader { position: fixed; inset: 0; background: rgba(255,255,255,.92); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; }
-.spinner { width: 44px; height: 44px; border: 4px solid #e0e0e0; border-top-color: #4A90E2; border-radius: 50%; animation: spin .9s linear infinite; margin-bottom: 14px; }
-@keyframes spin { to { transform: rotate(360deg); } }
+        body { font-family: "Microsoft JhengHei", system-ui, sans-serif; margin: 0; background: var(--primary-bg); color: #2d3436; }
+        
+        /* 介面佈局 */
+        .app-header { background: #2c3e50; color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+        .main-content { padding: 20px; max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
 
-/* ── 頂部欄 ── */
-.app-header { background: #2c3e50; color: white; padding: 0 20px; height: 52px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
-.app-header h1 { font-size: 1.1rem; font-weight: 500; }
-.header-btns { display: flex; gap: 8px; }
+        /* 專案管理列 */
+        .project-nav { background: white; padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); display: flex; gap: 15px; align-items: center; }
+        .project-select { flex-grow: 1; padding: 10px; border-radius: 6px; border: 1px solid #ced4da; font-size: 14px; }
 
-/* ── 工程選擇列 ── */
-.proj-bar { background: white; border-bottom: 1px solid #dde; padding: 10px 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.proj-bar select { padding: 6px 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px; min-width: 200px; }
-.status-msg { font-size: 12px; color: #4A90E2; margin-left: auto; height: 18px; font-weight: 500; }
+        /* 編輯區域 */
+        .editor-card { background: white; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .project-title-input { width: 100%; font-size: 1.5rem; font-weight: bold; padding: 12px; border: 2px solid #fab005; border-radius: 8px; margin-bottom: 20px; background: var(--highlight-yellow); box-sizing: border-box; color: #2c3e50; }
+        
+        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        th, td { border: 1px solid var(--border-color); padding: 10px; text-align: center; }
+        th { background: #f1f3f5; font-size: 14px; color: #495057; }
+        
+        input, select { padding: 6px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; width: 100%; box-sizing: border-box; }
+        .task-days { color: var(--accent-red); font-weight: bold; text-align: center; }
+        .task-end-display { color: #636e72; font-size: 12px; font-weight: bold; }
 
-/* ── 主內容 ── */
-.main { padding: 18px 20px; max-width: 1400px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+        /* 看板樣式 */
+        .summary-banner { background: #fff9db; border: 2px solid #fcc419; padding: 15px; border-radius: 8px; text-align: center; font-size: 1.1rem; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        .summary-total { color: var(--accent-red); font-size: 1.8rem; margin: 0 5px; }
+        .banner-date-input { width: 160px !important; background: white; font-weight: bold; font-size: 15px !important; border: 1px solid #fab005 !important; }
 
-/* ── 模式選擇畫面 ── */
-.mode-pick-screen { background: white; border-radius: 10px; border: 1px solid #e0e0e0; padding: 40px 20px; display: flex; flex-direction: column; align-items: center; gap: 18px; }
-.mode-pick-screen h2 { font-size: 1.2rem; font-weight: 500; color: #2d3436; }
-.mode-pick-screen p { font-size: 13px; color: #636e72; }
-.mode-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; width: 100%; max-width: 500px; }
-.mode-card { border: 2px solid #e0e0e0; border-radius: 12px; padding: 24px 16px; cursor: pointer; text-align: center; background: white; transition: border-color .15s, background .15s; }
-.mode-card:hover { border-color: #4A90E2; background: #f0f7ff; }
-.mode-card .mc-icon { font-size: 32px; margin-bottom: 10px; }
-.mode-card .mc-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
-.mode-card .mc-desc { font-size: 12px; color: #636e72; line-height: 1.6; }
+        /* 甘特圖顯示區 */
+        .gantt-section { background: white; border-radius: 10px; border: 1px solid var(--border-color); display: flex; overflow: hidden; box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
+        
+        /* 左側 Sidebar */
+        .gantt-sidebar { width: var(--sidebar-width); flex-shrink: 0; background: #f8f9fa; border-right: 2px solid #2d3436; z-index: 5; }
+        .gantt-sidebar-header { height: var(--header-height); background: #e9ecef; border-bottom: 2px solid #2d3436; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px; text-align: center; box-sizing: border-box; }
+        .gantt-project-name { color: #e67e22; font-weight: bold; font-size: 14px; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        
+        /* 右側捲動區 */
+        .gantt-main { flex-grow: 1; overflow-x: auto; position: relative; display: flex; flex-direction: column; } 
+        .gantt-timeline { height: var(--header-height); position: relative; border-bottom: 2px solid #333; background: white; flex-shrink: 0; }
+        .month-marker { position: absolute; top: 12px; border-left: 2px solid #adb5bd; padding-left: 6px; font-weight: bold; font-size: 14px; color: #212529; white-space: nowrap; }
+        .day-marker { position: absolute; bottom: 8px; font-size: 10px; color: #868e96; transform: scale(0.9); }
 
-/* ── 編輯卡片 ── */
-.card { background: white; border-radius: 10px; border: 1px solid #e0e0e0; padding: 18px 20px; box-shadow: 0 2px 6px rgba(0,0,0,.04); }
-.card-title { font-size: 13px; font-weight: 600; color: #636e72; margin-bottom: 12px; }
+        /* 圖表內容區 */
+        .gantt-body { position: relative; min-height: 200px; background: white; }
+        .gantt-row { height: 45px; border-bottom: 1px solid #f1f3f5; position: relative; display: flex; align-items: center; box-sizing: border-box; }
+        .sidebar-task-item { height: 45px; display: flex; align-items: center; padding: 0 15px; border-bottom: 1px solid #f1f3f5; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }
+        
+        .task-bar { position: absolute; height: 28px; border-radius: 14px; color: white; font-size: 11px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 6px rgba(0,0,0,0.15); white-space: nowrap; cursor: pointer; z-index: 2; border: 1px solid rgba(0,0,0,0.1); top: 8px; font-weight: bold; }
+        .gantt-grid { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; background-image: linear-gradient(to right, #f1f3f5 1px, transparent 1px); }
 
-/* ── 工程標題列 ── */
-.proj-info-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.proj-name-inp { font-size: 1.3rem; font-weight: 700; padding: 8px 12px; border: 2px solid #fab005; border-radius: 8px; background: #fff9db; color: #2c3e50; flex: 1; min-width: 200px; }
-.mode-badge { font-size: 12px; padding: 4px 12px; border-radius: 20px; font-weight: 600; white-space: nowrap; }
-.badge-days { background: #ebf8ee; color: #1e8449; border: 1px solid #a9dfbf; }
-.badge-date { background: #eaf3fb; color: #1a5276; border: 1px solid #aed6f1; }
-.switch-mode-btn { font-size: 12px; padding: 4px 10px; border: 1px solid #ced4da; border-radius: 6px; background: white; cursor: pointer; color: #636e72; }
-.switch-mode-btn:hover { background: #f4f6f8; }
+        /* 按鈕樣式 */
+        .btn { border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-primary { background: #0984e3; color: white; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn-danger { background: #e17055; color: white; }
+        .btn-dark { background: #2d3436; color: white; }
+        .btn-small { padding: 4px 8px; font-size: 12px; }
 
-/* ── 統計欄 ── */
-.summary-bar { background: #fff9db; border: 1px solid #fce08a; border-radius: 8px; padding: 10px 16px; display: flex; gap: 20px; align-items: center; flex-wrap: wrap; font-size: 13px; }
-.summary-bar b { color: #e17055; font-size: 1.05rem; }
-.summary-bar input[type=date] { padding: 4px 8px; border: 1px solid #fce08a; border-radius: 6px; background: white; font-size: 13px; font-weight: 600; }
-
-/* ── 工作項目表格 ── */
-table { width: 100%; border-collapse: collapse; }
-th, td { border: 1px solid #e0e0e0; padding: 8px 10px; text-align: center; vertical-align: middle; }
-th { background: #f4f6f8; font-size: 12px; color: #636e72; font-weight: 600; white-space: nowrap; }
-td:first-child { text-align: left; }
-input[type=text], input[type=number], input[type=date], select {
-  padding: 5px 8px; border: 1px solid #ced4da; border-radius: 5px; font-size: 13px; width: 100%; background: white; color: #2d3436;
-}
-input[readonly] { background: #f4f6f8; color: #9e9e9e; }
-.end-disp { font-size: 12px; color: #636e72; white-space: nowrap; }
-.follow-label { font-size: 11px; color: #636e72; display: flex; align-items: center; gap: 3px; margin-top: 3px; white-space: nowrap; }
-.follow-label input[type=checkbox] { width: auto; }
-
-/* ── 按鈕 ── */
-.btn { border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.btn-blue { background: #4A90E2; color: white; }
-.btn-blue:hover { background: #357abd; }
-.btn-green { background: #27ae60; color: white; }
-.btn-green:hover { background: #1e8449; }
-.btn-red { background: #e74c3c; color: white; }
-.btn-red:hover { background: #c0392b; }
-.btn-dark { background: #2d3436; color: white; }
-.btn-dark:hover { background: #1a1f20; }
-.btn-sm { padding: 4px 9px; font-size: 12px; }
-.btn-ghost { background: white; border: 1px dashed #ced4da; color: #636e72; width: 100%; justify-content: center; margin-top: 8px; }
-.btn-ghost:hover { background: #f4f6f8; }
-
-/* ── 顏色選擇 ── */
-.color-swatch { width: 20px; height: 20px; border-radius: 50%; display: inline-block; vertical-align: middle; border: 2px solid rgba(0,0,0,.12); }
-.color-select-wrap { display: flex; align-items: center; gap: 6px; }
-.color-select-wrap select { width: auto; }
-
-/* ── 甘特圖 ── */
-#captureArea { background: white; border-radius: 10px; border: 1px solid #e0e0e0; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,.06); }
-.gantt-section { display: flex; }
-.gantt-sidebar { width: var(--sidebar-w); flex-shrink: 0; border-right: 2px solid #2d3436; background: #f8f9fa; }
-.gantt-sidebar-hd { height: var(--header-h); background: #e9ecef; border-bottom: 2px solid #2d3436; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px; text-align: center; }
-.gantt-proj-name { font-weight: 700; font-size: 13px; color: #e67e22; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.gantt-scroll { flex: 1; overflow-x: auto; }
-.gantt-timeline { height: var(--header-h); position: relative; border-bottom: 2px solid #333; background: white; }
-.month-mark { position: absolute; top: 10px; border-left: 2px solid #adb5bd; padding-left: 5px; font-weight: 700; font-size: 13px; color: #212529; white-space: nowrap; }
-.day-mark { position: absolute; bottom: 7px; font-size: 10px; color: #868e96; }
-/* 純天數模式時間軸 */
-.pct-mark { position: absolute; top: 50%; transform: translateY(-50%); font-size: 11px; color: #636e72; border-left: 1px solid #ced4da; padding-left: 4px; white-space: nowrap; }
-.gantt-body { position: relative; background: white; }
-.gantt-row { height: 42px; border-bottom: 1px solid #f1f3f5; position: relative; }
-.sidebar-item { height: 42px; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid #f1f3f5; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-bar { position: absolute; height: 26px; top: 8px; border-radius: 13px; color: white; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; box-shadow: 0 3px 6px rgba(0,0,0,.15); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 10px; z-index: 2; }
-.gantt-grid-bg { position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(to right, #f1f3f5 1px, transparent 1px); }
-</style>
+        /* 載入中 */
+        .loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10000; display: none; }
+        .spinner { width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .status-msg { text-align: center; font-size: 12px; color: #2980b9; height: 18px; margin-top: -10px; font-weight: bold; }
+        .api-config-msg { background: #e74c3c; color: white; padding: 10px; text-align: center; font-size: 14px; display: none; }
+    </style>
 </head>
 <body>
 
-<div id="loader"><div class="spinner"></div><span id="loaderText">載入中...</span></div>
-
-<header class="app-header">
-  <h1>🏗️ 工程甘特圖管理系統</h1>
-  <div class="header-btns">
-    <button class="btn btn-dark" onclick="exportFile('jpg')">🖼️ 匯出 JPG</button>
-    <button class="btn btn-dark" onclick="exportFile('pdf')">📄 匯出 PDF</button>
-  </div>
-</header>
-
-<!-- 工程選擇列 -->
-<div class="proj-bar">
-  <strong>工程切換：</strong>
-  <select id="projSelect" onchange="loadProject(this.value)"></select>
-  <button class="btn btn-green" onclick="newProject()">＋ 新增工程</button>
-  <button class="btn btn-red btn-sm" onclick="deleteProject()">🗑️ 刪除</button>
-  <span id="statusMsg" class="status-msg"></span>
+<div id="loader" class="loader">
+    <div class="spinner"></div>
+    <div id="loaderText">正在讀取 Google Sheets 資料...</div>
 </div>
 
-<div class="main" id="mainArea"></div>
+<div id="configNotice" class="api-config-msg">
+    ⚠️ 尚未設定 Google Sheets API URL。請先部署 Apps Script 並填入程式碼中的 GAS_URL。
+</div>
 
-<script>
-/* ──────────────────────────────
-   ★ 請填入你的 Apps Script 網址
-   ────────────────────────────── */
-const GAS_URL = "https://script.google.com/macros/s/AKfycbyc86jVGmXMzXBeh9BFD-VcGV-bGFDjZhAu3F5A4L_gU-1xRkb4cpth-Sy8Idoq7gINtA/exec";
-
-const PALETTE = ['#4A90E2','#27ae60','#9b59b6','#f39c12','#e74c3c','#1abc9c','#fd79a8','#2c3e50','#00b894','#6c5ce7'];
-const COLOR_NAMES = {'#4A90E2':'藍','#27ae60':'綠','#9b59b6':'紫','#f39c12':'橘','#e74c3c':'紅','#1abc9c':'青','#fd79a8':'粉','#2c3e50':'深','#00b894':'翠','#6c5ce7':'靛'};
-
-let projects = {};
-let activeId = '';
-let saveTimer = null;
-
-/* ── 初始化 ── */
-window.onload = () => fetchAll(true);
-
-/* ── API ── */
-async function fetchAll(showLoad = false) {
-  if (showLoad) showLoader(true, '讀取雲端資料...');
-  try {
-    const res = await fetch(`${GAS_URL}?action=list`);
-    const json = await res.json();
-    projects = json.data || {};
-    updateSelector();
-    const keys = Object.keys(projects);
-    if (!activeId || !projects[activeId]) {
-      activeId = keys.length ? keys[0] : '';
-    }
-    renderMain();
-  } catch(e) { setStatus('❌ 無法連線'); }
-  finally { if (showLoad) showLoader(false); }
-}
-
-async function apiSave(id, data, silent = false) {
-  if (!silent) showLoader(true, '儲存中...');
-  else setStatus('雲端同步中...');
-  try {
-    await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: 'save', id, data }) });
-    setStatus('✅ 已同步'); setTimeout(() => setStatus(''), 3000);
-  } catch(e) { setStatus('❌ 同步失敗'); }
-  finally { if (!silent) showLoader(false); }
-}
-
-async function apiDelete(id) {
-  showLoader(true, '刪除中...');
-  try {
-    await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: 'delete', id }) });
-    await fetchAll(false);
-  } catch(e) { setStatus('❌ 刪除失敗'); }
-  finally { showLoader(false); }
-}
-
-/* ── 工程管理 ── */
-function newProject() {
-  const name = prompt('請輸入工程名稱：', '新工程');
-  if (!name || !name.trim()) return;
-  const id = 'prj_' + Date.now();
-  projects[id] = { name: name.trim(), mode: null, startDate: '', tasks: [] };
-  activeId = id;
-  updateSelector();
-  renderMain();
-  scheduleSave();
-}
-
-function loadProject(id) {
-  activeId = id;
-  renderMain();
-}
-
-function deleteProject() {
-  if (!activeId) return;
-  if (!confirm('確定刪除此工程？')) return;
-  apiDelete(activeId);
-  delete projects[activeId];
-  const keys = Object.keys(projects);
-  activeId = keys.length ? keys[0] : '';
-  updateSelector();
-  renderMain();
-}
-
-function setMode(m) {
-  if (!activeId) return;
-  const proj = projects[activeId];
-  proj.mode = m;
-  if (!proj.tasks.length) {
-    proj.tasks = [{ name: '工作項目一', days: 7, color: PALETTE[0], start: '', follow: false }];
-  }
-  renderMain();
-  scheduleSave();
-}
-
-function switchMode() {
-  if (!confirm('切換模式會清除日期資料，確定繼續？')) return;
-  const proj = projects[activeId];
-  proj.mode = null;
-  proj.startDate = '';
-  proj.tasks.forEach(t => { t.start = ''; t.follow = false; });
-  renderMain();
-  scheduleSave();
-}
-
-/* ── 即時儲存 ── */
-function scheduleSave() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    if (activeId && projects[activeId]) apiSave(activeId, projects[activeId], true);
-  }, 2000);
-}
-
-function onChange() {
-  collectFromDOM();
-  renderGantt();
-  updateSummary();
-  scheduleSave();
-}
-
-/* ── 從 DOM 收集資料 ── */
-function collectFromDOM() {
-  const proj = projects[activeId];
-  if (!proj) return;
-  const nameEl = document.getElementById('projNameInp');
-  if (nameEl) { proj.name = nameEl.value; updateSelector(); }
-  const startEl = document.getElementById('projStartInp');
-  if (startEl) proj.startDate = startEl.value;
-  const endEl = document.getElementById('projEndInp');
-  if (endEl) proj.endDate = endEl.value;
-
-  const rows = document.querySelectorAll('#taskBody tr');
-  proj.tasks = [];
-  rows.forEach(r => {
-    proj.tasks.push({
-      name:   r.querySelector('.t-name')?.value || '',
-      days:   parseInt(r.querySelector('.t-days')?.value) || 1,
-      start:  r.querySelector('.t-start')?.value || '',
-      follow: r.querySelector('.t-follow')?.checked || false,
-      color:  r.querySelector('.t-color')?.value || PALETTE[0],
-    });
-  });
-}
-
-/* ── 渲染主畫面 ── */
-function renderMain() {
-  const area = document.getElementById('mainArea');
-  if (!activeId || !projects[activeId]) {
-    area.innerHTML = '<div style="text-align:center;padding:60px;color:#9e9e9e">請先新增一個工程</div>';
-    return;
-  }
-  const proj = projects[activeId];
-  if (!proj.mode) { renderModePick(area, proj); return; }
-  renderEditor(area, proj);
-}
-
-function renderModePick(area, proj) {
-  area.innerHTML = `
-    <div class="mode-pick-screen">
-      <h2>「${esc(proj.name)}」— 請選擇甘特圖模式</h2>
-      <p>選擇後仍可隨時切換</p>
-      <div class="mode-cards">
-        <div class="mode-card" onclick="setMode('days')">
-          <div class="mc-icon">📊</div>
-          <div class="mc-title">純天數模式</div>
-          <div class="mc-desc">只填各項工期天數<br>不需要實際日期<br>適合估算、規劃階段</div>
-        </div>
-        <div class="mode-card" onclick="setMode('date')">
-          <div class="mc-icon">📅</div>
-          <div class="mc-title">日期模式</div>
-          <div class="mc-desc">填入開始日期<br>各工項自動推算日期<br>適合實際排程追蹤</div>
-        </div>
-      </div>
-    </div>`;
-}
-
-function renderEditor(area, proj) {
-  const isDate = proj.mode === 'date';
-  const dateCol = isDate
-    ? `<th style="width:16%">起始日期</th><th style="width:11%">完成日期</th>`
-    : '';
-
-  area.innerHTML = `
-    <!-- 工程資訊 -->
-    <div class="card">
-      <div class="proj-info-row">
-        <input id="projNameInp" class="proj-name-inp" type="text" value="${esc(proj.name)}" oninput="onChange()">
-        <span class="mode-badge ${isDate ? 'badge-date' : 'badge-days'}">${isDate ? '📅 日期模式' : '📊 純天數模式'}</span>
-        <button class="switch-mode-btn" onclick="switchMode()">切換模式</button>
-      </div>
+<header class="app-header">
+    <div style="display: flex; align-items: center; gap: 15px;">
+        <h1 style="margin: 0; font-size: 1.4rem;">🏗️ Google Sheets 甘特圖系統</h1>
     </div>
+    <div class="export-actions">
+        <button class="btn btn-dark" onclick="exportFile('jpg')">🖼️ 匯出 JPG</button>
+        <button class="btn btn-dark" onclick="exportFile('pdf')">📄 匯出 PDF</button>
+    </div>
+</header>
+
+<div class="main-content">
+    <!-- 專案選擇列 -->
+    <div class="project-nav">
+        <strong>工程切換：</strong>
+        <select id="projectSelect" class="project-select" onchange="loadSpecificProject(this.value)">
+            <option value="">載入中...</option>
+        </select>
+        <button class="btn btn-success" onclick="addNewProjectPrompt()">+ 新增工程</button>
+        <button class="btn btn-danger" onclick="deleteCurrentProject()">🗑️ 刪除專案</button>
+    </div>
+
+    <!-- 編輯區域 -->
+    <div class="editor-card">
+        <input type="text" id="projectName" class="project-title-input" placeholder="請輸入工程名稱" oninput="handleTitleUpdate()">
+        
+        <table id="taskTable">
+            <thead>
+                <tr>
+                    <th style="width: 25%;">工作項目內容</th>
+                    <th style="width: 8%;">預估天數</th>
+                    <th style="width: 20%;">起始日期</th>
+                    <th style="width: 15%;">完成日期</th>
+                    <th style="width: 12%;">顏色</th>
+                    <th style="width: 18%;">操作</th>
+                </tr>
+            </thead>
+            <tbody id="taskBody"></tbody>
+        </table>
+        <button class="btn btn-primary" onclick="addTaskRow()">+ 新增工作細項</button>
+    </div>
+
+    <div id="statusMsg" class="status-msg"></div>
 
     <!-- 統計看板 -->
-    <div id="summaryBar" class="summary-bar"></div>
-
-    <!-- 工作項目表格 -->
-    <div class="card">
-      <div class="card-title">工作項目清單</div>
-      <table>
-        <thead><tr>
-          <th style="width:28%;text-align:left">工作項目名稱</th>
-          <th style="width:9%">天數</th>
-          ${dateCol}
-          <th style="width:10%">顏色</th>
-          <th style="width:14%">操作</th>
-        </tr></thead>
-        <tbody id="taskBody"></tbody>
-      </table>
-      <button class="btn btn-ghost" onclick="addTask()">＋ 新增工作項目</button>
+    <div id="summaryBanner" class="summary-banner">
+        <span>開工：</span>
+        <input type="date" id="projStartInput" class="banner-date-input" oninput="triggerCloudSave()">
+        <span style="margin: 0 10px;">~ 完工：</span>
+        <input type="date" id="projEndInput" class="banner-date-input" oninput="triggerCloudSave()">
+        <span style="margin-left:20px">總工期：<span id="totalDaysDisplay" class="summary-total">0</span> 日曆天</span>
     </div>
 
-    <!-- 甘特圖 -->
-    <div id="captureArea">
-      <div class="gantt-section">
-        <div class="gantt-sidebar">
-          <div class="gantt-sidebar-hd">
-            <div id="ganttTitle" class="gantt-proj-name">${esc(proj.name)}</div>
-            <div style="font-size:11px;color:#636e72;margin-top:4px">工作清單</div>
-          </div>
-          <div id="sidebarList"></div>
+    <!-- 甘特圖渲染區 -->
+    <div id="captureArea" class="gantt-section">
+        <div id="ganttSidebar" class="gantt-sidebar">
+            <div class="gantt-sidebar-header">
+                <div id="ganttDisplayTitle" class="gantt-project-name">未命名工程</div>
+                <div style="font-size: 12px; color: #495057;">工作清單項目</div>
+            </div>
+            <div id="sidebarList"></div>
         </div>
-        <div class="gantt-scroll" id="ganttScroll">
-          <div id="ganttTimeline" class="gantt-timeline"></div>
-          <div id="ganttBody" class="gantt-body">
-            <div class="gantt-grid-bg" id="ganttGrid"></div>
-            <div id="ganttBars"></div>
-          </div>
+        <div id="scrollArea" class="gantt-main">
+            <!-- 時間軸 -->
+            <div id="timeAxis" class="gantt-timeline"></div>
+            <div id="ganttChartBody" class="gantt-body">
+                <div class="gantt-grid" id="ganttGrid"></div>
+                <div id="taskBarArea"></div>
+            </div>
         </div>
-      </div>
-    </div>`;
+    </div>
+</div>
 
-  renderTaskRows(proj);
-  renderGantt();
-  updateSummary();
-}
+<script>
+    /** * --- Google Sheets API URL ---
+     * 已經填入你提供的 Apps Script 部署網址。
+     */
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbyc86jVGmXMzXBeh9BFD-VcGV-bGFDjZhAu3F5A4L_gU-1xRkb4cpth-Sy8Idoq7gINtA/exec"; 
 
-/* ── 渲染工作列 ── */
-function renderTaskRows(proj) {
-  const isDate = proj.mode === 'date';
-  const tbody = document.getElementById('taskBody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-  proj.tasks.forEach((t, i) => {
-    tbody.insertAdjacentHTML('beforeend', makeTaskRow(t, i, isDate, proj));
-  });
-}
+    let activeProjectId = '';
+    let projectsMap = {};
+    const pxPerDay = 2.2;
+    let saveTimeout = null;
 
-function makeTaskRow(t, i, isDate, proj) {
-  const colorOpts = PALETTE.map(c =>
-    `<option value="${c}" ${t.color === c ? 'selected' : ''}>${COLOR_NAMES[c] || c}</option>`
-  ).join('');
+    window.onload = async () => {
+        if (!GAS_URL) {
+            document.getElementById('configNotice').style.display = 'block';
+            projectsMap = { 'default': { title: "範例工程", tasks: [], startDate: "2026-04-01", endDate: "2027-08-15" } };
+            loadSpecificProject('default');
+            return;
+        }
+        await fetchAllProjects(true);
+    };
 
-  let dateCell = '';
-  if (isDate) {
-    const followToggle = i === 0 ? '' :
-      `<label class="follow-label"><input type="checkbox" class="t-follow" ${t.follow ? 'checked' : ''} onchange="onChange()"> 接續前項</label>`;
-    dateCell = `
-      <td>
-        <input type="date" class="t-start" value="${t.start || ''}" ${t.follow && i > 0 ? 'readonly' : ''} oninput="onChange()">
-        ${followToggle}
-      </td>
-      <td><span class="end-disp t-end">—</span></td>`;
-  }
-
-  return `<tr>
-    <td><input type="text" class="t-name" value="${esc(t.name)}" placeholder="工作項目名稱" oninput="onChange()"></td>
-    <td><input type="number" class="t-days" value="${t.days || 7}" min="1" style="width:65px" oninput="onChange()"></td>
-    ${dateCell}
-    <td>
-      <div class="color-select-wrap">
-        <select class="t-color" onchange="onChange()"><option disabled>選色</option>${colorOpts}</select>
-        <span class="color-swatch" style="background:${t.color}"></span>
-      </div>
-    </td>
-    <td style="white-space:nowrap">
-      <button class="btn btn-blue btn-sm" onclick="insertTask(${i})">插入</button>
-      <button class="btn btn-red btn-sm" onclick="removeTask(${i})">刪除</button>
-    </td>
-  </tr>`;
-}
-
-function addTask() {
-  collectFromDOM();
-  const proj = projects[activeId];
-  proj.tasks.push({ name: '新工作項目', days: 7, color: PALETTE[proj.tasks.length % PALETTE.length], start: '', follow: false });
-  renderTaskRows(proj);
-  renderGantt();
-  updateSummary();
-  scheduleSave();
-}
-
-function insertTask(i) {
-  collectFromDOM();
-  const proj = projects[activeId];
-  proj.tasks.splice(i, 0, { name: '新工作項目', days: 5, color: PALETTE[i % PALETTE.length], start: '', follow: false });
-  renderTaskRows(proj);
-  renderGantt();
-  updateSummary();
-  scheduleSave();
-}
-
-function removeTask(i) {
-  collectFromDOM();
-  const proj = projects[activeId];
-  proj.tasks.splice(i, 1);
-  renderTaskRows(proj);
-  renderGantt();
-  updateSummary();
-  scheduleSave();
-}
-
-/* ── 甘特圖渲染 ── */
-function renderGantt() {
-  const proj = projects[activeId];
-  if (!proj) return;
-  const isDate = proj.mode === 'date';
-
-  const sidebar = document.getElementById('sidebarList');
-  const barsArea = document.getElementById('ganttBars');
-  const timeline = document.getElementById('ganttTimeline');
-  const ganttBody = document.getElementById('ganttBody');
-  const ganttTitle = document.getElementById('ganttTitle');
-  if (!sidebar || !barsArea || !timeline) return;
-
-  if (ganttTitle) ganttTitle.textContent = proj.name || '未命名工程';
-  sidebar.innerHTML = '';
-  barsArea.innerHTML = '';
-  timeline.innerHTML = '';
-
-  const rows = document.querySelectorAll('#taskBody tr');
-  const tasks = [];
-  let prevEnd = null;
-
-  rows.forEach((row, i) => {
-    const name = row.querySelector('.t-name')?.value || '';
-    const days = parseInt(row.querySelector('.t-days')?.value) || 1;
-    const color = row.querySelector('.t-color')?.value || PALETTE[0];
-    const followEl = row.querySelector('.t-follow');
-    const follow = followEl ? followEl.checked : false;
-    const startInp = row.querySelector('.t-start');
-
-    if (isDate) {
-      if (follow && prevEnd && i > 0) {
-        const ns = new Date(prevEnd); ns.setDate(ns.getDate() + 1);
-        if (startInp) { startInp.value = ns.toISOString().split('T')[0]; startInp.readOnly = true; startInp.style.background = '#f4f6f8'; }
-      } else if (startInp && !follow) {
-        startInp.readOnly = false; startInp.style.background = '';
-      }
-      const startStr = startInp?.value;
-      if (startStr) {
-        const start = new Date(startStr);
-        const end = new Date(start); end.setDate(start.getDate() + days - 1);
-        const endEl = row.querySelector('.t-end');
-        if (endEl) endEl.textContent = end.toISOString().split('T')[0].replace(/-/g, '/');
-        tasks.push({ name, days, color, start, end });
-        prevEnd = end;
-      }
-    } else {
-      tasks.push({ name, days, color });
+    async function apiRequest(action, data = {}, isSilent = false) {
+        if (!isSilent) showLoader(true);
+        if (isSilent) updateStatus("雲端同步中...");
+        try {
+            const response = await fetch(GAS_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ action, ...data })
+            });
+            if (action !== 'save') await fetchAllProjects(isSilent);
+            else { updateStatus("✅ 已同步至雲端"); setTimeout(() => updateStatus(""), 3000); }
+        } catch (e) { updateStatus("❌ 同步失敗"); }
+        finally { if (!isSilent) showLoader(false); }
     }
-  });
 
-  if (!tasks.length) return;
-
-  if (isDate) {
-    renderDateGantt(tasks, sidebar, barsArea, timeline, ganttBody);
-  } else {
-    renderDaysGantt(tasks, sidebar, barsArea, timeline, ganttBody);
-  }
-}
-
-function renderDateGantt(tasks, sidebar, barsArea, timeline, ganttBody) {
-  const pxD = 2.4;
-  const valid = tasks.filter(t => t.start && t.end);
-  if (!valid.length) return;
-
-  const minD = new Date(Math.min(...valid.map(t => t.start.getTime())));
-  minD.setDate(1); minD.setDate(minD.getDate() - 3);
-  const maxD = new Date(Math.max(...valid.map(t => t.end.getTime())));
-  maxD.setDate(maxD.getDate() + 12);
-  const totalDays = Math.ceil((maxD - minD) / 86400000);
-  const totalW = totalDays * pxD;
-
-  timeline.style.width = totalW + 'px';
-  ganttBody.style.width = totalW + 'px';
-  document.getElementById('ganttGrid').style.backgroundSize = `${pxD * 7}px 100%`;
-
-  for (let i = 0; i <= totalDays; i++) {
-    const d = new Date(minD); d.setDate(d.getDate() + i);
-    if (d.getDate() === 1) {
-      const m = document.createElement('div'); m.className = 'month-mark';
-      m.style.left = (i * pxD) + 'px';
-      m.textContent = `${d.getFullYear()}/${d.getMonth() + 1}`;
-      timeline.appendChild(m);
+    async function fetchAllProjects(showLoaderOverlay = false) {
+        if (showLoaderOverlay) showLoader(true);
+        try {
+            const response = await fetch(`${GAS_URL}?action=list`);
+            const result = await response.json();
+            projectsMap = result.data || {};
+            updateSelectorUI();
+            if (!activeProjectId || !projectsMap[activeProjectId]) {
+                const keys = Object.keys(projectsMap);
+                if (keys.length > 0) loadSpecificProject(keys[0]);
+            } else refreshUI();
+        } catch (e) { console.error(e); }
+        finally { if (showLoaderOverlay) showLoader(false); }
     }
-    if (d.getDate() === 1 || d.getDate() === 15) {
-      const dl = document.createElement('div'); dl.className = 'day-mark';
-      dl.style.left = (i * pxD) + 'px'; dl.textContent = d.getDate();
-      timeline.appendChild(dl);
+
+    function updateSelectorUI() {
+        const sel = document.getElementById('projectSelect');
+        sel.innerHTML = '';
+        Object.keys(projectsMap).forEach(id => {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = projectsMap[id].title || "未命名工程";
+            if (id === activeProjectId) opt.selected = true;
+            sel.appendChild(opt);
+        });
     }
-  }
 
-  valid.forEach(t => {
-    const si = document.createElement('div'); si.className = 'sidebar-item'; si.textContent = t.name; si.title = t.name;
-    sidebar.appendChild(si);
-    const row = document.createElement('div'); row.className = 'gantt-row'; row.style.width = totalW + 'px';
-    const offset = Math.ceil((t.start - minD) / 86400000);
-    const bar = document.createElement('div'); bar.className = 'task-bar';
-    bar.style.left = (offset * pxD) + 'px';
-    bar.style.width = Math.max(t.days * pxD, 24) + 'px';
-    bar.style.background = t.color;
-    bar.textContent = t.days + '天'; bar.title = `${t.name}：${t.days}天`;
-    row.appendChild(bar); barsArea.appendChild(row);
-  });
-}
-
-function renderDaysGantt(tasks, sidebar, barsArea, timeline, ganttBody) {
-  const total = tasks.reduce((s, t) => s + t.days, 0);
-  if (!total) return;
-  const trackW = 600;
-
-  timeline.style.width = trackW + 'px';
-  ganttBody.style.width = trackW + 'px';
-  document.getElementById('ganttGrid').style.backgroundSize = `${trackW / 10}px 100%`;
-
-  [0, 25, 50, 75, 100].forEach(p => {
-    const mk = document.createElement('div'); mk.className = 'pct-mark';
-    mk.style.left = (p / 100 * trackW) + 'px';
-    mk.textContent = Math.round(total * p / 100) + '天';
-    timeline.appendChild(mk);
-  });
-
-  let acc = 0;
-  tasks.forEach(t => {
-    const si = document.createElement('div'); si.className = 'sidebar-item'; si.textContent = t.name; si.title = t.name;
-    sidebar.appendChild(si);
-    const row = document.createElement('div'); row.className = 'gantt-row'; row.style.width = trackW + 'px';
-    const bar = document.createElement('div'); bar.className = 'task-bar';
-    bar.style.left = (acc / total * trackW) + 'px';
-    bar.style.width = Math.max(t.days / total * trackW, 24) + 'px';
-    bar.style.background = t.color;
-    bar.textContent = t.days + '天'; bar.title = `${t.name}：${t.days}天`;
-    row.appendChild(bar); barsArea.appendChild(row);
-    acc += t.days;
-  });
-}
-
-/* ── 統計欄 ── */
-function updateSummary() {
-  const proj = projects[activeId];
-  const el = document.getElementById('summaryBar');
-  if (!el || !proj) return;
-  const isDate = proj.mode === 'date';
-  const total = (proj.tasks || []).reduce((s, t) => s + (parseInt(t.days) || 0), 0);
-
-  let dateHtml = '';
-  if (isDate) {
-    dateHtml = `
-      <span>開工：<input type="date" id="projStartInp" value="${proj.startDate || ''}" style="border:1px solid #fce08a" oninput="onChange()"></span>
-      <span>完工：<input type="date" id="projEndInp" value="${proj.endDate || ''}" style="border:1px solid #fce08a" oninput="onChange()"></span>`;
-  }
-  el.innerHTML = `<span>項目：<b>${proj.tasks.length}</b></span><span>總工期：<b>${total} 天</b></span>${dateHtml}`;
-}
-
-/* ── 選擇器 ── */
-function updateSelector() {
-  const sel = document.getElementById('projSelect');
-  sel.innerHTML = '';
-  const keys = Object.keys(projects);
-  if (!keys.length) { sel.innerHTML = '<option value="">（尚無工程）</option>'; return; }
-  keys.forEach(id => {
-    const o = document.createElement('option');
-    o.value = id; o.textContent = projects[id].name || '未命名';
-    if (id === activeId) o.selected = true;
-    sel.appendChild(o);
-  });
-}
-
-/* ── 匯出 ── */
-async function exportFile(type) {
-  const target = document.getElementById('captureArea');
-  const scroll = document.getElementById('ganttScroll');
-  if (!target || !scroll) return;
-  const fullW = target.offsetWidth - scroll.offsetWidth + scroll.scrollWidth;
-  showLoader(true, '產生圖檔中...');
-  try {
-    const canvas = await html2canvas(target, {
-      scale: 2, useCORS: true, backgroundColor: '#ffffff',
-      width: fullW, windowWidth: fullW,
-      onclone: cloned => {
-        const cs = cloned.getElementById('ganttScroll');
-        cs.style.width = scroll.scrollWidth + 'px';
-        cs.style.overflow = 'visible';
-      }
-    });
-    if (type === 'jpg') {
-      const a = document.createElement('a');
-      a.download = (projects[activeId]?.name || '甘特圖') + '.jpg';
-      a.href = canvas.toDataURL('image/jpeg', 0.92);
-      a.click();
-    } else {
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width / 2, canvas.height / 2] });
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, canvas.width / 2, canvas.height / 2);
-      pdf.save((projects[activeId]?.name || '甘特圖') + '.pdf');
+    function loadSpecificProject(id) {
+        activeProjectId = id;
+        refreshUI();
     }
-  } catch(e) { alert('匯出失敗：' + e.message); }
-  finally { showLoader(false); }
-}
 
-/* ── 工具 ── */
-function showLoader(show, text = '') { const l = document.getElementById('loader'); l.style.display = show ? 'flex' : 'none'; if (text) document.getElementById('loaderText').textContent = text; }
-function setStatus(t) { document.getElementById('statusMsg').textContent = t; }
-function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    async function addNewProjectPrompt() {
+        const name = prompt("請輸入新工程名稱：", "新工程項目");
+        if (!name) return;
+        const newId = 'prj_' + Date.now();
+        const data = { title: name, tasks: [], startDate: "", endDate: "" };
+        if (!GAS_URL) { projectsMap[newId] = data; loadSpecificProject(newId); return; }
+        await apiRequest('save', { id: newId, data: data }, false);
+    }
+
+    async function deleteCurrentProject() {
+        if (!activeProjectId || !confirm("確定要刪除嗎？")) return;
+        if (!GAS_URL) { delete projectsMap[activeProjectId]; activeProjectId = ''; updateSelectorUI(); return; }
+        await apiRequest('delete', { id: activeProjectId }, false);
+        activeProjectId = '';
+    }
+
+    function handleTitleUpdate() {
+        const val = document.getElementById('projectName').value;
+        document.getElementById('ganttDisplayTitle').textContent = val || "未命名工程";
+        triggerCloudSave();
+    }
+
+    function refreshUI() {
+        const data = projectsMap[activeProjectId];
+        if (!data) return;
+        document.getElementById('projectName').value = data.title || "";
+        document.getElementById('ganttDisplayTitle').textContent = data.title || "未命名工程";
+        document.getElementById('projStartInput').value = data.startDate || "";
+        document.getElementById('projEndInput').value = data.endDate || "";
+        const tbody = document.getElementById('taskBody');
+        tbody.innerHTML = '';
+        (data.tasks || []).forEach((t, i) => {
+            tbody.insertAdjacentHTML('beforeend', createTaskRowHTML(t, i === 0));
+        });
+        renderGantt();
+    }
+
+    function createTaskRowHTML(t, isFirst) {
+        const followChecked = t.follow ? 'checked' : '';
+        const followToggle = isFirst ? '' : `<div style="font-size:11px; margin-top:4px;"><input type="checkbox" class="t-follow" ${followChecked} onchange="triggerCloudSave()"> 接續前項</div>`;
+        return `<tr>
+            <td><input type="text" class="t-name" value="${t.name || ''}" placeholder="工作項目..." oninput="triggerCloudSave()"></td>
+            <td><input type="number" class="t-days" value="${t.days || 10}" oninput="triggerCloudSave()"></td>
+            <td><input type="date" class="t-start" value="${t.start || ''}" oninput="triggerCloudSave()">${followToggle}</td>
+            <td class="task-end-display"></td>
+            <td>
+                <select class="t-color" onchange="triggerCloudSave()">
+                    <option value="#9b59b6" ${t.color==='#9b59b6'?'selected':''}>紫色</option>
+                    <option value="#4A90E2" ${t.color==='#4A90E2'?'selected':''}>藍色</option>
+                    <option value="#27ae60" ${t.color==='#27ae60'?'selected':''}>綠色</option>
+                    <option value="#f39c12" ${t.color==='#f39c12'?'selected':''}>橘色</option>
+                    <option value="#e74c3c" ${t.color==='#e74c3c'?'selected':''}>紅色</option>
+                    <option value="#1abc9c" ${t.color==='#1abc9c'?'selected':''}>青色</option>
+                    <option value="#fd79a8" ${t.color==='#fd79a8'?'selected':''}>粉色</option>
+                    <option value="#2c3e50" ${t.color==='#2c3e50'?'selected':''}>深色</option>
+                </select>
+            </td>
+            <td>
+                <button class="btn btn-primary btn-small" onclick="insertTaskRow(this)">插入</button>
+                <button class="btn btn-danger btn-small" onclick="removeTaskRow(this)">刪除</button>
+            </td>
+        </tr>`;
+    }
+
+    function addTaskRow() { document.getElementById('taskBody').insertAdjacentHTML('beforeend', createTaskRowHTML({}, false)); triggerCloudSave(); }
+    function insertTaskRow(btn) { btn.closest('tr').insertAdjacentHTML('beforebegin', createTaskRowHTML({}, false)); triggerCloudSave(); }
+    function removeTaskRow(btn) { btn.closest('tr').remove(); triggerCloudSave(); }
+
+    function triggerCloudSave() {
+        const rows = document.querySelectorAll('#taskBody tr');
+        const tasks = [];
+        rows.forEach(r => {
+            tasks.push({
+                name: r.querySelector('.t-name').value,
+                days: parseInt(r.querySelector('.t-days').value) || 0,
+                start: r.querySelector('.t-start').value,
+                follow: r.querySelector('.t-follow')?.checked || false,
+                color: r.querySelector('.t-color').value
+            });
+        });
+        const updatedData = {
+            title: document.getElementById('projectName').value,
+            startDate: document.getElementById('projStartInput').value,
+            endDate: document.getElementById('projEndInput').value,
+            tasks: tasks
+        };
+        projectsMap[activeProjectId] = updatedData;
+        renderGantt();
+        if (!GAS_URL) return;
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => { apiRequest('save', { id: activeProjectId, data: updatedData }, true); }, 2500);
+    }
+
+    function renderGantt() {
+        const rows = document.querySelectorAll('#taskBody tr');
+        const sidebarList = document.getElementById('sidebarList');
+        const barsArea = document.getElementById('taskBarArea');
+        const axis = document.getElementById('timeAxis');
+        
+        sidebarList.innerHTML = '';
+        barsArea.innerHTML = '';
+        axis.innerHTML = '';
+
+        let tasksData = [];
+        let datesPool = [];
+        let prevTaskEnd = null;
+
+        const pStartStr = document.getElementById('projStartInput').value;
+        const pEndStr = document.getElementById('projEndInput').value;
+        if (pStartStr && pEndStr) {
+            const start = new Date(pStartStr);
+            const end = new Date(pEndStr);
+            const diff = Math.ceil((end - start) / 86400000);
+            document.getElementById('totalDaysDisplay').textContent = diff >= 0 ? diff : 0;
+            datesPool.push(start, end);
+        } else document.getElementById('totalDaysDisplay').textContent = 0;
+
+        rows.forEach((row) => {
+            const n = row.querySelector('.t-name').value;
+            const d = parseInt(row.querySelector('.t-days').value) || 0;
+            const sInp = row.querySelector('.t-start');
+            const follow = row.querySelector('.t-follow')?.checked || false;
+            const color = row.querySelector('.t-color').value;
+
+            if (follow && prevTaskEnd) {
+                const nextS = new Date(prevTaskEnd);
+                nextS.setDate(nextS.getDate() + 1);
+                sInp.value = nextS.toISOString().split('T')[0];
+                sInp.readOnly = true;
+                sInp.style.backgroundColor = "#f1f3f5";
+            } else {
+                sInp.readOnly = false;
+                sInp.style.backgroundColor = "";
+            }
+
+            if (sInp.value) {
+                const start = new Date(sInp.value);
+                const end = new Date(start);
+                end.setDate(start.getDate() + d);
+                row.querySelector('.task-end-display').textContent = end.toISOString().split('T')[0].replace(/-/g, '/');
+                tasksData.push({ name: n, start, end, days: d, color });
+                datesPool.push(start, end);
+                prevTaskEnd = end;
+            }
+        });
+
+        if (!datesPool.length) return;
+
+        const minD = new Date(Math.min(...datesPool)); minD.setDate(1); minD.setDate(minD.getDate() - 5);
+        const maxD = new Date(Math.max(...datesPool)); maxD.setDate(maxD.getDate() + 15);
+        const totalDays = Math.ceil((maxD - minD) / 86400000);
+        const totalW = totalDays * pxPerDay;
+
+        document.getElementById('ganttChartBody').style.width = totalW + 'px';
+        axis.style.width = totalW + 'px';
+        document.getElementById('ganttGrid').style.backgroundSize = `${pxPerDay}px 100%`;
+
+        for (let i = 0; i <= totalDays; i++) {
+            const cur = new Date(minD); cur.setDate(cur.getDate() + i);
+            if (cur.getDate() === 1) {
+                const ml = document.createElement('div'); ml.className = 'month-marker';
+                ml.style.left = (i * pxPerDay) + 'px'; ml.innerText = `${cur.getFullYear()}/${cur.getMonth()+1}`;
+                axis.appendChild(ml);
+            }
+            if (cur.getDate() === 1 || cur.getDate() === 15) {
+                const dl = document.createElement('div'); dl.className = 'day-marker';
+                dl.style.left = (i * pxPerDay) + 'px'; dl.innerText = cur.getDate();
+                axis.appendChild(dl);
+            }
+        }
+
+        tasksData.forEach(t => {
+            const si = document.createElement('div'); si.className = 'sidebar-task-item'; si.textContent = t.name;
+            sidebarList.appendChild(si);
+            const row = document.createElement('div'); row.className = 'gantt-row';
+            const offset = Math.ceil((t.start - minD) / 86400000);
+            const bar = document.createElement('div'); bar.className = 'task-bar';
+            bar.style.left = (offset * pxPerDay) + 'px';
+            bar.style.width = (t.days * pxPerDay) + 'px';
+            bar.style.backgroundColor = t.color;
+            bar.textContent = t.days + '天';
+            row.appendChild(bar);
+            barsArea.appendChild(row);
+        });
+    }
+
+    async function exportFile(type) {
+        const target = document.getElementById('captureArea');
+        const scroll = document.getElementById('scrollArea');
+        const fullW = target.offsetWidth - scroll.offsetWidth + scroll.scrollWidth;
+        try {
+            const canvas = await html2canvas(target, {
+                scale: 2, useCORS: true, backgroundColor: "#ffffff",
+                width: fullW, windowWidth: fullW,
+                onclone: (cloned) => {
+                    const cS = cloned.getElementById('scrollArea');
+                    cS.style.width = scroll.scrollWidth + "px";
+                    cS.style.overflow = "visible";
+                }
+            });
+            if (type === 'jpg') {
+                const link = document.createElement('a');
+                link.download = `${document.getElementById('projectName').value || '工程甘特圖'}.jpg`;
+                link.href = canvas.toDataURL("image/jpeg", 0.9);
+                link.click();
+            } else {
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width/2, canvas.height/2] });
+                pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, canvas.width/2, canvas.height/2);
+                pdf.save(`${document.getElementById('projectName').value || '工程甘特圖'}.pdf`);
+            }
+        } catch (e) { console.error(e); }
+    }
+    function showLoader(show) { document.getElementById('loader').style.display = show ? 'flex' : 'none'; }
+    function updateStatus(text) { document.getElementById('statusMsg').innerText = text; }
 </script>
 </body>
 </html>
